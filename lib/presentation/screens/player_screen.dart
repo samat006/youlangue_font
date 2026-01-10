@@ -1,7 +1,7 @@
 // lib/presentation/screens/player_screen.dart
 
-import 'dart:convert';
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
@@ -30,24 +30,27 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   final WebSocketService _wsService = WebSocketService();
   late SynchronizedPlayerService _syncPlayer;
-  
-  String _status = 'Initialisation...';
-  String _voiceDetected = '';
-  int _progress = 0;
-  int _totalChunks = 0;
-  List<AudioChunk> _transcripts = [];
-  bool _isTranslating = false;
-  bool _isDisposing = false;
-  bool _waitingForFirstChunk = true;
-  
-  Timer? _uiTimer;
-  bool _isPlaying = false;
-  Duration _currentPosition = Duration.zero;
 
-  // Couleurs du thème
-  final Color primaryColor = const Color(0xFF6366F1);
-  final Color accentColor = const Color(0xFFA855F7);
-  final Color bgColor = const Color(0xFF0F172A);
+  // États UI
+  String _status = 'Connexion NeuralNet...';
+  double _progress = 0.0;
+  List<AudioChunk> _transcripts = [];
+  bool _isTranslating = true;
+  bool _waitingForFirstChunk = true;
+  bool _isPlaying = false;
+  
+  // État du panneau (Pliable)
+  bool _isControlsExpanded = true;
+
+  // Volumes
+  double _volTranslated = 1.0;
+  double _volOriginal = 0.5; // Mis à 50% pour tester l'effet
+
+  Timer? _uiTimer;
+
+  // Couleurs YouTube "Cyber"
+  final Color ytRed = const Color(0xFFFF0000);
+  final Color ytBlack = const Color(0xFF0F0F0F);
 
   @override
   void initState() {
@@ -61,27 +64,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final videoId = YoutubePlayer.convertUrlToId(widget.video.url);
     _syncPlayer = SynchronizedPlayerService();
     _syncPlayer.initializeVideo(videoId!);
+    
+    // Force les volumes au démarrage
+    Future.delayed(Duration(seconds: 1), () {
+      _syncPlayer.setTranslatedVolume(_volTranslated);
+      _syncPlayer.setOriginalVolume(_volOriginal);
+    });
   }
 
   void _startUIUpdates() {
     _uiTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
-      if (!mounted || _isDisposing) {
-        timer.cancel();
-        return;
-      }
+      if (!mounted) return;
       setState(() {
         _isPlaying = _syncPlayer.isPlaying;
-        _currentPosition = _syncPlayer.position;
       });
     });
   }
 
   Future<void> _connectAndStartTranslation() async {
-    setState(() { 
-      _status = 'Connexion au serveur...'; 
-      _isTranslating = true; 
-    });
-    
     try {
       await _wsService.connect();
       _wsService.stream?.listen(_handleWebSocketMessage);
@@ -91,509 +91,361 @@ class _PlayerScreenState extends State<PlayerScreen> {
         voicePreference: widget.voiceType,
       );
     } catch (e) {
-      setState(() { 
-        _status = 'Erreur de connexion'; 
-        _isTranslating = false; 
-      });
+      setState(() => _status = 'Erreur uplink');
     }
   }
 
   void _handleWebSocketMessage(dynamic message) {
-    if (_isDisposing || !mounted) return;
-    
+    if (!mounted) return;
     try {
       final data = json.decode(message);
-      final type = data['type'] as String;
-      
+      final type = data['type'];
+
       switch (type) {
-        case 'status': 
-          setState(() => _status = data['message'] ?? ''); 
+        case 'status':
+          setState(() => _status = data['message']);
           break;
-          
         case 'translation_ready':
           _syncPlayer.setTotalChunks(
-            data['total_chunks'] ?? 0, 
-            (data['chunk_duration'] ?? 10.0).toDouble()
-          );
-          setState(() => _totalChunks = data['total_chunks'] ?? 0);
+              data['total_chunks'], (data['chunk_duration'] ?? 10.0).toDouble());
           break;
-          
         case 'audio_chunk':
           final chunk = AudioChunk.fromJson(data);
           if (chunk.data.isNotEmpty) {
             _syncPlayer.addAudioChunk(chunk);
             if (_waitingForFirstChunk && _syncPlayer.hasFirstChunk) {
-              _waitingForFirstChunk = false;
-              Future.delayed(
-                const Duration(milliseconds: 800), 
-                () => _syncPlayer.startPlayback()
-              );
+              setState(() => _waitingForFirstChunk = false);
+              Future.delayed(const Duration(seconds: 1), () => _syncPlayer.startPlayback());
             }
           }
           setState(() {
-            _progress = chunk.progress;
+            _progress = (chunk.progress / 100);
             if (chunk.transcript.isNotEmpty) _transcripts.add(chunk);
           });
           break;
-          
         case 'translation_complete':
           _syncPlayer.markTranslationComplete();
-          setState(() => _isTranslating = false);
+          setState(() {
+            _status = "SYSTÈME PRÊT";
+            _isTranslating = false;
+          });
           break;
       }
-    } catch (e) { 
-      print('Error: $e'); 
-    }
+    } catch (e) { print(e); }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: bgColor,
+      backgroundColor: ytBlack,
       body: Stack(
         children: [
+          // 1. Vidéo et Transcript (Fond)
           Column(
             children: [
-              _buildHeader(),
-              _buildVideoSection(),
-              _buildUnifiedControls(),
-              // ✅ NOUVEAU : Contrôles Volume
-              _buildVolumeControls(),
-              _buildStatusInterface(),
-              Expanded(child: _buildTranscriptSection()),
-            ],
-          ),
-          if (_waitingForFirstChunk) _buildLoadingOverlay(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(8, 40, 16, 16),
-      decoration: BoxDecoration(
-        color: bgColor.withOpacity(0.8),
-        border: Border(bottom: BorderSide(color: Colors.white10, width: 0.5)),
-      ),
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
-            onPressed: () => Navigator.pop(context),
-          ),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.video.title, 
-                  style: const TextStyle(
-                    color: Colors.white, 
-                    fontSize: 15, 
-                    fontWeight: FontWeight.bold
-                  ), 
-                  maxLines: 1, 
-                  overflow: TextOverflow.ellipsis
-                ),
-                Text(
-                  widget.video.channelTitle, 
-                  style: TextStyle(color: Colors.blueGrey[300], fontSize: 12)
-                ),
-              ],
-            ),
-          ),
-          _buildLanguageBadge(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLanguageBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: primaryColor.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: primaryColor.withOpacity(0.5)),
-      ),
-      child: Text(
-        widget.targetLang.toUpperCase(), 
-        style: TextStyle(
-          color: primaryColor, 
-          fontWeight: FontWeight.bold, 
-          fontSize: 10
-        )
-      ),
-    );
-  }
-
-  Widget _buildVideoSection() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black54, 
-            blurRadius: 20, 
-            offset: const Offset(0, 10)
-          )
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            YoutubePlayer(
-              controller: _syncPlayer.videoController, 
-              showVideoProgressIndicator: false
-            ),
-            // Bloqueur d'interaction
-            GestureDetector(
-              onTap: () {},
-              child: Container(color: Colors.transparent, height: 220),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildUnifiedControls() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            primaryColor.withOpacity(0.9), 
-            accentColor.withOpacity(0.9)
-          ],
-        ),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _formatDuration(_currentPosition), 
-                style: const TextStyle(
-                  color: Colors.white, 
-                  fontWeight: FontWeight.w500
-                )
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: Colors.black26, 
-                  borderRadius: BorderRadius.circular(8)
-                ),
-                child: Text(
-                  'Chunk ${_syncPlayer.currentChunkIndex + 1}/${_totalChunks}', 
-                  style: const TextStyle(color: Colors.white, fontSize: 11)
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 15),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-            children: [
-              _controlButton(
-                Icons.skip_previous_rounded, 
-                _syncPlayer.canNavigatePrevious, 
-                _syncPlayer.previousChunk
-              ),
-              _playPauseButton(),
-              _controlButton(
-                Icons.skip_next_rounded, 
-                _syncPlayer.canNavigateNext, 
-                _syncPlayer.nextChunk
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ✅ NOUVEAU : Widget Contrôles Volume
-  Widget _buildVolumeControls() {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white10, width: 0.5),
-      ),
-      child: Column(
-        children: [
-          // Volume Audio Traduit
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: primaryColor.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
-                  Icons.translate_rounded, 
-                  color: primaryColor, 
-                  size: 18
-                ),
-              ),
-              const SizedBox(width: 10),
-              const Text(
-                'Traduit',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
+              _buildImmersiveVideo(),
               Expanded(
-                child: SliderTheme(
-                  data: SliderThemeData(
-                    trackHeight: 3,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                child: Container(
+                  color: ytBlack,
+                  child: Stack(
+                    children: [
+                      // Transcript avec effet de fade en bas
+                      TranscriptView(transcripts: _transcripts),
+                      // Petit gradient pour cacher le bas du texte sous les contrôles
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Container(
+                          height: 150,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.transparent, ytBlack],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  child: Slider(
-                    value: _syncPlayer.translatedVolume,
-                    min: 0.0,
-                    max: 1.0,
-                    activeColor: primaryColor,
-                    inactiveColor: Colors.white24,
-                    onChanged: (value) {
-                      _syncPlayer.setTranslatedVolume(value);
-                      setState(() {});
-                    },
-                  ),
-                ),
-              ),
-              SizedBox(
-                width: 38,
-                child: Text(
-                  '${(_syncPlayer.translatedVolume * 100).toInt()}%',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.right,
                 ),
               ),
             ],
           ),
+
+          // 2. Header Flottant (Retour + Titre)
+          Positioned(top: 0, left: 0, right: 0, child: _buildCyberHeader()),
+
+          // 3. Overlay Chargement
+          if (_waitingForFirstChunk) _buildLoadingOverlay(),
+
+          // 4. LE DOCK DE CONTRÔLE PLIABLE
+          // On utilise AnimatedPositioned pour faire glisser le panneau
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.fastOutSlowIn,
+            left: 15,
+            right: 15,
+            // Si déplié : à 20px du bas. Si plié : on le cache plus bas (mais on laisse un bout dépasser)
+            bottom: _isControlsExpanded ? 20 : -260, 
+            child: _buildCollapsibleDock(),
+          ),
           
-          const SizedBox(height: 12),
-          
-          // Toggle Audio Original
-          InkWell(
-            onTap: () {
-              _syncPlayer.toggleOriginalAudio();
-              setState(() {});
-            },
-            borderRadius: BorderRadius.circular(12),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-              decoration: BoxDecoration(
-                color: _syncPlayer.originalMuted 
-                  ? Colors.white10
-                  : Colors.greenAccent.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: _syncPlayer.originalMuted 
-                    ? Colors.white24
-                    : Colors.greenAccent.withOpacity(0.5),
-                  width: 1,
-                ),
+          // 5. Bouton de réouverture (Visible seulement quand le dock est caché)
+          if (!_isControlsExpanded)
+            Positioned(
+              bottom: 30,
+              right: 30,
+              child: FloatingActionButton(
+                backgroundColor: ytRed,
+                child: const Icon(Icons.tune, color: Colors.white),
+                onPressed: () => setState(() => _isControlsExpanded = true),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCollapsibleDock() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // La petite "poignée" pour fermer/ouvrir
+        GestureDetector(
+          onTap: () => setState(() => _isControlsExpanded = !_isControlsExpanded),
+          child: Container(
+            width: 60,
+            height: 5,
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+        
+        // Le panneau principal
+        ClipRRect(
+          borderRadius: BorderRadius.circular(30),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1A1A1A).withOpacity(0.90),
+                border: Border.all(color: Colors.white.withOpacity(0.1)),
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 20, offset: const Offset(0, 10)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    _syncPlayer.originalMuted 
-                      ? Icons.volume_off_rounded 
-                      : Icons.volume_up_rounded,
-                    color: _syncPlayer.originalMuted 
-                      ? Colors.white54
-                      : Colors.greenAccent,
-                    size: 20,
+                  // Bouton pour fermer le panneau (Chevron)
+                  GestureDetector(
+                    onTap: () => setState(() => _isControlsExpanded = false),
+                    child: Icon(Icons.keyboard_arrow_down, color: Colors.white54, size: 30),
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    _syncPlayer.originalMuted 
-                      ? 'Audio original coupé' 
-                      : 'Audio original actif',
-                    style: TextStyle(
-                      color: _syncPlayer.originalMuted 
-                        ? Colors.white54
-                        : Colors.greenAccent,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
+                  
+                  // 1. Barre de progression
+                  if (_progress > 0)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: LinearProgressIndicator(
+                        value: _progress,
+                        backgroundColor: Colors.white10,
+                        valueColor: AlwaysStoppedAnimation(ytRed),
+                        minHeight: 2,
+                      ),
                     ),
+
+                  // 2. MIXEUR AUDIO
+                  _buildVolumeMixer(),
+                  
+                  const SizedBox(height: 15),
+                  Divider(color: Colors.white.withOpacity(0.1), height: 1),
+                  const SizedBox(height: 15),
+
+                  // 3. CONTRÔLES NAVIGATION
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _navButton(Icons.skip_previous, _syncPlayer.canNavigatePrevious, () => _syncPlayer.previousChunk()),
+                      
+                      GestureDetector(
+                        onTap: () => _syncPlayer.playPause(),
+                        child: Container(
+                          height: 60, width: 60,
+                          decoration: BoxDecoration(
+                            color: ytRed,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(color: ytRed.withOpacity(0.5), blurRadius: 15, spreadRadius: 2),
+                            ],
+                          ),
+                          child: Icon(
+                            _isPlaying ? Icons.pause : Icons.play_arrow,
+                            color: Colors.white, size: 35,
+                          ),
+                        ),
+                      ),
+
+                      _navButton(Icons.skip_next, _syncPlayer.canNavigateNext, () => _syncPlayer.nextChunk()),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 10),
+                  Text(
+                    "CHUNK ${_syncPlayer.currentChunkIndex + 1} / ${_syncPlayer.totalChunks}",
+                    style: TextStyle(color: Colors.grey[600], fontSize: 10, letterSpacing: 2),
                   ),
                 ],
               ),
             ),
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildVolumeMixer() {
+    return Column(
+      children: [
+        // Volume Traduit
+        Row(
+          children: [
+            const Icon(Icons.record_voice_over, color: Colors.white, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SliderTheme(
+                data: SliderThemeData(
+                  trackHeight: 4,
+                  activeTrackColor: Colors.white,
+                  inactiveTrackColor: Colors.white10,
+                  thumbColor: Colors.white,
+                  overlayShape: SliderComponentShape.noOverlay,
+                ),
+                child: Slider(
+                  value: _volTranslated,
+                  onChanged: (val) {
+                    setState(() => _volTranslated = val);
+                    _syncPlayer.setTranslatedVolume(val);
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        // Volume Original
+        Row(
+          children: [
+            Icon(Icons.volume_up, color: ytRed, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: SliderTheme(
+                data: SliderThemeData(
+                  trackHeight: 4,
+                  activeTrackColor: ytRed,
+                  inactiveTrackColor: Colors.white10,
+                  thumbColor: ytRed,
+                  overlayShape: SliderComponentShape.noOverlay,
+                ),
+                child: Slider(
+                  value: _volOriginal,
+                  onChanged: (val) {
+                    setState(() => _volOriginal = val);
+                    // Appel direct au service avec la nouvelle fonction robuste
+                    _syncPlayer.setOriginalVolume(val);
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildImmersiveVideo() {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.40,
+      decoration: BoxDecoration(
+        boxShadow: [
+          BoxShadow(color: ytRed.withOpacity(0.1), blurRadius: 30, spreadRadius: 5),
+        ],
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          YoutubePlayer(
+            controller: _syncPlayer.videoController,
+            showVideoProgressIndicator: false,
+          ),
+          GestureDetector(
+            onTap: () => _syncPlayer.playPause(),
+            behavior: HitTestBehavior.opaque,
+            child: Container(color: Colors.transparent),
+          ),
         ],
       ),
     );
   }
 
-  Widget _playPauseButton() {
-    return GestureDetector(
-      onTap: () => _syncPlayer.playPause(),
-      child: Container(
-        height: 65, 
-        width: 65,
-        decoration: const BoxDecoration(
-          color: Colors.white, 
-          shape: BoxShape.circle, 
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black26, 
-              blurRadius: 15, 
-              offset: Offset(0, 5)
-            )
-          ]
-        ),
-        child: Icon(
-          _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, 
-          size: 45, 
-          color: primaryColor
-        ),
-      ),
-    );
-  }
-
-  Widget _controlButton(IconData icon, bool enabled, VoidCallback onTap) {
-    return IconButton(
-      icon: Icon(icon, size: 32),
-      color: enabled ? Colors.white : Colors.white38,
-      onPressed: enabled ? onTap : null,
-    );
-  }
-
-  Widget _buildStatusInterface() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      child: Column(
-        children: [
-          Row(
+  Widget _buildCyberHeader() {
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 50, 16, 16),
+          color: Colors.black.withOpacity(0.4),
+          child: Row(
             children: [
-              if (_isTranslating) 
-                const SizedBox(
-                  width: 12, 
-                  height: 12, 
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2, 
-                    valueColor: AlwaysStoppedAnimation(Colors.white54)
-                  )
-                ),
-              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
+                onPressed: () => Navigator.pop(context),
+              ),
               Expanded(
                 child: Text(
-                  _status, 
-                  style: const TextStyle(color: Colors.white70, fontSize: 12)
-                )
-              ),
-              Text(
-                '$_progress%', 
-                style: const TextStyle(
-                  color: Colors.white70, 
-                  fontSize: 12, 
-                  fontWeight: FontWeight.bold
-                )
+                  widget.video.title.toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: LinearProgressIndicator(
-              value: _progress / 100, 
-              minHeight: 4, 
-              backgroundColor: Colors.white10, 
-              valueColor: AlwaysStoppedAnimation(primaryColor)
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildTranscriptSection() {
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        color: Color(0xFF1E293B),
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(30), 
-          topRight: Radius.circular(30)
-        ),
-      ),
-      child: ClipRRect(
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(30), 
-          topRight: Radius.circular(30)
-        ),
-        child: TranscriptView(transcripts: _transcripts),
-      ),
+  Widget _navButton(IconData icon, bool enabled, VoidCallback onTap) {
+    return IconButton(
+      icon: Icon(icon, color: enabled ? Colors.white : Colors.white24, size: 32),
+      onPressed: enabled ? onTap : null,
     );
   }
 
   Widget _buildLoadingOverlay() {
     return BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+      filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
       child: Container(
-        color: Colors.black.withOpacity(0.7),
+        color: Colors.black54,
         child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation(primaryColor)
-              ),
-              const SizedBox(height: 24),
-              const Text(
-                'Préparation de la traduction...', 
-                style: TextStyle(
-                  color: Colors.white, 
-                  fontSize: 16, 
-                  fontWeight: FontWeight.bold
-                )
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Chunk 1 en cours de traitement', 
-                style: TextStyle(color: Colors.blueGrey[300], fontSize: 13)
-              ),
-            ],
-          ),
+          child: CircularProgressIndicator(color: ytRed),
         ),
       ),
     );
   }
 
-  String _formatDuration(Duration d) {
-    return "${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:"
-           "${d.inSeconds.remainder(60).toString().padLeft(2, '0')}";
-  }
-
   @override
   void dispose() {
-    _isDisposing = true;
     _uiTimer?.cancel();
     _syncPlayer.dispose();
     _wsService.disconnect();

@@ -28,11 +28,11 @@ class SynchronizedPlayerService {
   final List<IndexedAudioChunk> _audioIndex = [];
   ConcatenatingAudioSource? _playlist;
   
-  // ✅ Stocker les positions réelles de début de chaque chunk
   final List<double> _chunkStartPositions = [];
   
+  // --- GESTION DES VOLUMES ---
   double _translatedVolume = 1.0;
-  bool _originalMuted = false;
+  double _originalVolume = 0.2; // ✅ Ajouté : Volume par défaut pour YouTube
   
   bool _isSyncing = false;
   Timer? _syncTimer;
@@ -48,6 +48,7 @@ class SynchronizedPlayerService {
   bool _wasPlaying = false;
   double _lastVideoPosition = 0.0;
   
+  // Getters
   bool get isPlaying => videoController.value.isPlaying;
   Duration get position => videoController.value.position;
   bool get canSeek => _translationComplete;
@@ -56,28 +57,38 @@ class SynchronizedPlayerService {
   int get totalChunks => _totalChunks;
   int get availableChunks => _audioIndex.length;
   double get translatedVolume => _translatedVolume;
-  bool get originalMuted => _originalMuted;
+  double get originalVolume => _originalVolume; // ✅ Ajouté
   
   bool get canNavigateNext => _hasStarted && _currentChunkIndex < _audioIndex.length - 1;
   bool get canNavigatePrevious => _hasStarted && _currentChunkIndex > 0;
   
-  void initializeVideo(String videoId) {
-    videoController = YoutubePlayerController(
-      initialVideoId: videoId,
-      flags: YoutubePlayerFlags(
-        autoPlay: false,
-        mute: false,
-        enableCaption: false,
-        controlsVisibleAtStart: false,
-        hideControls: true,
-        disableDragSeek: true,
-        loop: false,
-        forceHD: false,
-      ),
-    );
-    
-    _translatedAudioPlayer.setVolume(_translatedVolume);
-    _startAggressiveSync();
+ void initializeVideo(String videoId) {
+  videoController = YoutubePlayerController(
+    initialVideoId: videoId,
+    flags: YoutubePlayerFlags(
+      autoPlay: false,
+      mute: false, // Doit être à false ici
+      disableDragSeek: true,
+      hideControls: true,
+    ),
+  )..addListener(() {
+    // Force le volume dès que le player est prêt (Ready)
+    if (videoController.value.isReady && _hasStarted == false) {
+       videoController.unMute();
+       videoController.setVolume((_originalVolume * 100).toInt());
+    }
+  });
+  
+  _translatedAudioPlayer.setVolume(_translatedVolume);
+  _startAggressiveSync();
+}
+
+  // ✅ NOUVELLE MÉTHODE : Contrôle du volume original (YouTube)
+  Future<void> setOriginalVolume(double volume) async {
+    _originalVolume = volume.clamp(0.0, 1.0);
+    // Conversion 0.0-1.0 vers 0-100 pour YouTube
+    videoController.setVolume((_originalVolume * 100).toInt());
+    print('🔊 Volume Original: ${(_originalVolume * 100).toInt()}%');
   }
   
   void setTotalChunks(int total, double chunkDuration) {
@@ -90,18 +101,6 @@ class SynchronizedPlayerService {
     _translatedVolume = volume.clamp(0.0, 1.0);
     await _translatedAudioPlayer.setVolume(_translatedVolume);
     print('🔊 Volume traduit: ${(_translatedVolume * 100).toInt()}%');
-  }
-  
-  Future<void> toggleOriginalAudio() async {
-    _originalMuted = !_originalMuted;
-    
-    if (_originalMuted) {
-      videoController.mute();
-      print('🔇 Audio original coupé');
-    } else {
-      videoController.unMute();
-      print('🔊 Audio original activé');
-    }
   }
   
   void _startAggressiveSync() {
@@ -177,28 +176,22 @@ class SynchronizedPlayerService {
         await _buildAudioPlaylist();
         _hasFirstChunk = true;
         
-        // ✅ Stocker position du premier chunk
         _chunkStartPositions.add(0.0);
         
         print('✅ Premier chunk prêt');
       } else if (_playlist != null) {
-        // ✅ ATTENDRE que le chunk soit ajouté à la playlist
-        await _playlist!.add(_BytesAudioSource(bytes));
+        double cumulativePosition = 0.0;
         
-        // ✅ Puis obtenir la durée totale mise à jour
-        await Future.delayed(Duration(milliseconds: 100));
-        
-        final currentDuration = _translatedAudioPlayer.duration;
-        if (currentDuration != null) {
-          final realPosition = currentDuration.inMilliseconds / 1000.0;
-          _chunkStartPositions.add(realPosition);
-          print('📍 Position réelle chunk ${_audioIndex.length}: ${realPosition.toStringAsFixed(1)}s');
-        } else {
-          // Fallback : estimation
-          final estimatedPos = (_audioIndex.length - 1) * _chunkDuration;
-          _chunkStartPositions.add(estimatedPos);
-          print('⚠️ Estimation position chunk ${_audioIndex.length}: ${estimatedPos.toStringAsFixed(1)}s');
+        for (int i = 0; i < _audioIndex.length - 1; i++) {
+          final prevChunk = _audioIndex[i];
+          final duration = prevChunk.timestampEnd - prevChunk.timestampStart;
+          cumulativePosition += duration;
         }
+        
+        _chunkStartPositions.add(cumulativePosition);
+        print('📍 Position cumulée chunk ${_audioIndex.length}: ${cumulativePosition.toStringAsFixed(1)}s');
+        
+        await _playlist!.add(_BytesAudioSource(bytes));
       }
       
     } catch (e) {
@@ -275,36 +268,29 @@ class SynchronizedPlayerService {
     
     final wasPlayingBefore = videoController.value.isPlaying;
     
-    // Pause tout
     if (wasPlayingBefore) {
       videoController.pause();
       await _translatedAudioPlayer.pause();
       await Future.delayed(Duration(milliseconds: 200));
     }
     
-    // Seek vidéo
     final targetVideoPos = Duration(milliseconds: (chunk.timestampStart * 1000).toInt());
     videoController.seekTo(targetVideoPos);
     print('📹 Vidéo → ${chunk.timestampStart.toStringAsFixed(1)}s');
     
     await Future.delayed(Duration(milliseconds: 800));
     
-    // ✅ Seek audio avec position réelle stockée
     double targetAudioPos;
     if (chunkIndex < _chunkStartPositions.length) {
       targetAudioPos = _chunkStartPositions[chunkIndex];
-      print('🎵 Audio → ${targetAudioPos.toStringAsFixed(1)}s (position réelle)');
     } else {
-      // Fallback
       targetAudioPos = chunkIndex * _chunkDuration;
-      print('⚠️ Audio → ${targetAudioPos.toStringAsFixed(1)}s (estimation)');
     }
     
     try {
       await _translatedAudioPlayer.seek(
         Duration(milliseconds: (targetAudioPos * 1000).toInt())
       );
-      print('✅ Audio positionné');
     } catch (e) {
       print('❌ Erreur seek audio: $e');
     }
@@ -314,7 +300,6 @@ class SynchronizedPlayerService {
     
     await Future.delayed(Duration(milliseconds: 500));
     
-    // Reprendre
     if (wasPlayingBefore) {
       videoController.play();
       await Future.delayed(Duration(milliseconds: 200));
@@ -325,7 +310,6 @@ class SynchronizedPlayerService {
     await Future.delayed(Duration(milliseconds: 500));
     
     _isSyncing = false;
-    print('✅ === SEEK OK ===\n');
   }
   
   Future<void> seekTo(Duration position) async {
@@ -368,7 +352,6 @@ class SynchronizedPlayerService {
     }
     
     if (targetChunkIndex >= 0) {
-      // ✅ Utiliser position réelle si disponible
       double targetPosition;
       if (targetChunkIndex < _chunkStartPositions.length) {
         targetPosition = _chunkStartPositions[targetChunkIndex] + offsetInTargetChunk;
@@ -420,11 +403,6 @@ class SynchronizedPlayerService {
     
     _wasPlaying = false;
     _isSyncing = false;
-  }
-  
-  Future<void> goToStart() async {
-    print('🏠 Début');
-    await _seekToChunk(0);
   }
   
   void dispose() {

@@ -20,11 +20,16 @@ class _HomeScreenState extends State<HomeScreen> {
   
   List<VideoModel> _videos = [];
   bool _isLoading = false;
-  String _selectedLang = 'fr';
+  String _selectedLang = 'wo'; // Wolof par défaut
   String _selectedVoice = 'auto';
-  
-  // ✅ Liste exhaustive synchronisée avec le backend NLLB/Edge-TTS
+
+  // Couleurs YouTube
+  final Color ytBlack = const Color(0xFF0F0F0F);
+  final Color ytRed = const Color(0xFFFF0000);
+  final Color ytSurface = const Color(0xFF272727);
+
   final List<Map<String, String>> _languages = [
+    {'code': 'wo', 'name': 'Wolof', 'flag': '🇸🇳'},
     {'code': 'fr', 'name': 'Français', 'flag': '🇫🇷'},
     {'code': 'en', 'name': 'English', 'flag': '🇬🇧'},
     {'code': 'ar', 'name': 'العربية', 'flag': '🇸🇦'},
@@ -33,142 +38,192 @@ class _HomeScreenState extends State<HomeScreen> {
     {'code': 'it', 'name': 'Italiano', 'flag': '🇮🇹'},
     {'code': 'pt', 'name': 'Português', 'flag': '🇵🇹'},
     {'code': 'ru', 'name': 'Русский', 'flag': '🇷🇺'},
-    {'code': 'tr', 'name': 'Türkçe', 'flag': '🇹🇷'},
     {'code': 'zh', 'name': '中文', 'flag': '🇨🇳'},
     {'code': 'ja', 'name': '日本語', 'flag': '🇯🇵'},
-    {'code': 'ko', 'name': '한국어', 'flag': '🇰🇷'},
-    {'code': 'hi', 'name': 'हिन्दी', 'flag': '🇮🇳'},
-    {'code': 'wo', 'name': 'Wolof', 'flag': '🇸🇳'},
-    {'code': 'sw', 'name': 'Swahili', 'flag': '🇰🇪'},
   ];
   
   final List<Map<String, String>> _voices = [
-    {'code': 'auto', 'name': 'Auto', 'icon': '🤖'},
-    {'code': 'male', 'name': 'Homme', 'icon': '👨'},
-    {'code': 'female', 'name': 'Femme', 'icon': '👩'},
+    {'code': 'auto', 'name': 'Automatique', 'icon': '🤖'},
+    {'code': 'male', 'name': 'Voix Homme', 'icon': '👨'},
+    {'code': 'female', 'name': 'Voix Femme', 'icon': '👩'},
   ];
-
-  // ... (Le reste des méthodes _searchVideos, _playVideo, dispose reste identique)
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF5F5F5),
-      body: SafeArea(
-        child: Column(
+      backgroundColor: ytBlack,
+      appBar: AppBar(
+        backgroundColor: ytBlack,
+        elevation: 0,
+        title: Row(
           children: [
-            // Header avec gradient
-            Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
-                ),
+            Image.network(
+              'https://upload.wikimedia.org/wikipedia/commons/e/ef/Youtube_logo.png', // Ou ton logo Kaddu
+              height: 25,
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'Kaddu AI', 
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: -1),
+            ),
+          ],
+        ),
+      ),
+      body: Column(
+        children: [
+          // Barre de recherche YouTube Style
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Container(
+              decoration: BoxDecoration(
+                color: ytSurface,
+                borderRadius: BorderRadius.circular(25),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  children: [
-                    const Text(
-                      '🌍 Video Translator',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    
-                    // Barre de recherche
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(15),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 10,
-                            offset: const Offset(0, 5),
-                          ),
-                        ],
-                      ),
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          hintText: 'Rechercher une vidéo YouTube...',
-                          prefixIcon: const Icon(Icons.search, color: Color(0xFF667EEA)),
-                          suffixIcon: IconButton(
-                            icon: const Icon(Icons.send, color: Color(0xFF667EEA)),
-                            onPressed: _searchVideos,
-                          ),
-                          border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                        ),
-                        onSubmitted: (_) => _searchVideos(),
-                      ),
-                    ),
-                    const SizedBox(height: 15),
-                    
-                    // Sélecteurs langue et voix
-                    Row(
-                      children: [
-                        Expanded(
-                          child: LanguageSelector(
-                            languages: _languages,
-                            selectedLang: _selectedLang,
-                            onChanged: (lang) => setState(() => _selectedLang = lang!),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: VoiceSelector(
-                            voices: _voices,
-                            selectedVoice: _selectedVoice,
-                            onChanged: (voice) => setState(() => _selectedVoice = voice!),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+              child: TextField(
+                controller: _searchController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'Rechercher sur YouTube...',
+                  hintStyle: TextStyle(color: Colors.grey[500]),
+                  prefixIcon: Icon(Icons.search, color: Colors.grey[400]),
+                  suffixIcon: IconButton(
+                    icon: Icon(Icons.send, color: ytRed),
+                    onPressed: _searchVideos,
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
                 ),
+                onSubmitted: (_) => _searchVideos(),
               ),
             ),
-            
-            // Liste des résultats
-            Expanded(
-              child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
+          ),
+
+          // Sélecteurs rapides (Chips style)
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildActionButton(
+                    label: _languages.firstWhere((l) => l['code'] == _selectedLang)['name']!,
+                    icon: Icons.language,
+                    onTap: () => _showLanguagePicker(),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _buildActionButton(
+                    label: _voices.firstWhere((v) => v['code'] == _selectedVoice)['name']!,
+                    icon: Icons.record_voice_over,
+                    onTap: () => _showVoicePicker(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const Divider(color: Colors.white10, thickness: 1),
+
+          // Liste des vidéos
+          Expanded(
+            child: _isLoading
+                ? Center(child: CircularProgressIndicator(color: ytRed))
                 : _videos.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.video_library_outlined, size: 100, color: Colors.grey[300]),
-                          const SizedBox(height: 20),
-                          Text(
-                            'Recherchez une vidéo pour commencer',
-                            style: TextStyle(color: Colors.grey[600], fontSize: 16),
-                          ),
-                        ],
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(15),
-                      itemCount: _videos.length,
-                      itemBuilder: (context, index) {
-                        return VideoCard(
+                    ? _buildEmptyState()
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(8),
+                        itemCount: _videos.length,
+                        itemBuilder: (context, index) => VideoCard(
                           video: _videos[index],
                           onTap: () => _playVideo(_videos[index]),
-                        );
-                      },
-                    ),
-            ),
+                        ),
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton({required String label, required IconData icon, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+        decoration: BoxDecoration(
+          color: ytSurface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white10),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: ytRed, size: 18),
+            const SizedBox(width: 8),
+            Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
           ],
         ),
       ),
     );
   }
 
-  // --- Mêmes méthodes qu'avant ---
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.slow_motion_video, size: 80, color: ytSurface),
+          const SizedBox(height: 16),
+          Text(
+            'Entrez un sujet ou un lien vidéo',
+            style: TextStyle(color: Colors.grey[600]),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- Méthodes de sélection ---
+
+  void _showLanguagePicker() {
+    showModalBottomSheet(
+      backgroundColor: ytSurface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      context: context,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: ListView(
+          children: _languages.map((lang) => ListTile(
+            leading: Text(lang['flag']!, style: const TextStyle(fontSize: 24)),
+            title: Text(lang['name']!, style: const TextStyle(color: Colors.white)),
+            onTap: () {
+              setState(() => _selectedLang = lang['code']!);
+              Navigator.pop(context);
+            },
+          )).toList(),
+        ),
+      ),
+    );
+  }
+
+  void _showVoicePicker() {
+    showModalBottomSheet(
+      backgroundColor: ytSurface,
+      context: context,
+      builder: (context) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: _voices.map((v) => ListTile(
+          leading: Text(v['icon']!, style: const TextStyle(fontSize: 24)),
+          title: Text(v['name']!, style: const TextStyle(color: Colors.white)),
+          onTap: () {
+            setState(() => _selectedVoice = v['code']!);
+            Navigator.pop(context);
+          },
+        )).toList(),
+      ),
+    );
+  }
+
+  // ... (Garder _searchVideos et _playVideo tels quels)
   Future<void> _searchVideos() async {
     if (_searchController.text.trim().isEmpty) return;
     setState(() => _isLoading = true);
@@ -195,11 +250,5 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
   }
 }
