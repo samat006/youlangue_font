@@ -1,3 +1,5 @@
+// lib/presentation/screens/player_screen.dart
+
 import 'dart:convert';
 import 'dart:async';
 import 'dart:ui';
@@ -43,9 +45,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Duration _currentPosition = Duration.zero;
 
   // Couleurs du thème
-  final Color primaryColor = const Color(0xFF6366F1); // Indigo moderne
-  final Color accentColor = const Color(0xFFA855F7); // Violet
-  final Color bgColor = const Color(0xFF0F172A); // Bleu nuit sombre
+  final Color primaryColor = const Color(0xFF6366F1);
+  final Color accentColor = const Color(0xFFA855F7);
+  final Color bgColor = const Color(0xFF0F172A);
 
   @override
   void initState() {
@@ -55,7 +57,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _startUIUpdates();
   }
 
-  // ... (Garder les méthodes d'initialisation identiques à ton code) ...
   void _initializeSyncPlayer() {
     final videoId = YoutubePlayer.convertUrlToId(widget.video.url);
     _syncPlayer = SynchronizedPlayerService();
@@ -76,7 +77,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _connectAndStartTranslation() async {
-    setState(() { _status = 'Connexion au serveur...'; _isTranslating = true; });
+    setState(() { 
+      _status = 'Connexion au serveur...'; 
+      _isTranslating = true; 
+    });
+    
     try {
       await _wsService.connect();
       _wsService.stream?.listen(_handleWebSocketMessage);
@@ -86,28 +91,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
         voicePreference: widget.voiceType,
       );
     } catch (e) {
-      setState(() { _status = 'Erreur de connexion'; _isTranslating = false; });
+      setState(() { 
+        _status = 'Erreur de connexion'; 
+        _isTranslating = false; 
+      });
     }
   }
 
   void _handleWebSocketMessage(dynamic message) {
     if (_isDisposing || !mounted) return;
+    
     try {
       final data = json.decode(message);
       final type = data['type'] as String;
+      
       switch (type) {
-        case 'status': setState(() => _status = data['message'] ?? ''); break;
+        case 'status': 
+          setState(() => _status = data['message'] ?? ''); 
+          break;
+          
         case 'translation_ready':
-          _syncPlayer.setTotalChunks(data['total_chunks'] ?? 0, (data['chunk_duration'] ?? 5.0).toDouble());
+          _syncPlayer.setTotalChunks(
+            data['total_chunks'] ?? 0, 
+            (data['chunk_duration'] ?? 10.0).toDouble()
+          );
           setState(() => _totalChunks = data['total_chunks'] ?? 0);
           break;
+          
         case 'audio_chunk':
           final chunk = AudioChunk.fromJson(data);
           if (chunk.data.isNotEmpty) {
             _syncPlayer.addAudioChunk(chunk);
             if (_waitingForFirstChunk && _syncPlayer.hasFirstChunk) {
               _waitingForFirstChunk = false;
-              Future.delayed(const Duration(milliseconds: 800), () => _syncPlayer.startPlayback());
+              Future.delayed(
+                const Duration(milliseconds: 800), 
+                () => _syncPlayer.startPlayback()
+              );
             }
           }
           setState(() {
@@ -115,12 +135,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
             if (chunk.transcript.isNotEmpty) _transcripts.add(chunk);
           });
           break;
+          
         case 'translation_complete':
           _syncPlayer.markTranslationComplete();
           setState(() => _isTranslating = false);
           break;
       }
-    } catch (e) { print('Error: $e'); }
+    } catch (e) { 
+      print('Error: $e'); 
+    }
   }
 
   @override
@@ -134,6 +157,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
               _buildHeader(),
               _buildVideoSection(),
               _buildUnifiedControls(),
+              // ✅ NOUVEAU : Contrôles Volume
+              _buildVolumeControls(),
               _buildStatusInterface(),
               Expanded(child: _buildTranscriptSection()),
             ],
@@ -161,8 +186,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(widget.video.title, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold), maxLines: 1, overflow: TextOverflow.ellipsis),
-                Text(widget.video.channelTitle, style: TextStyle(color: Colors.blueGrey[300], fontSize: 12)),
+                Text(
+                  widget.video.title, 
+                  style: const TextStyle(
+                    color: Colors.white, 
+                    fontSize: 15, 
+                    fontWeight: FontWeight.bold
+                  ), 
+                  maxLines: 1, 
+                  overflow: TextOverflow.ellipsis
+                ),
+                Text(
+                  widget.video.channelTitle, 
+                  style: TextStyle(color: Colors.blueGrey[300], fontSize: 12)
+                ),
               ],
             ),
           ),
@@ -180,7 +217,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: primaryColor.withOpacity(0.5)),
       ),
-      child: Text(widget.targetLang.toUpperCase(), style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold, fontSize: 10)),
+      child: Text(
+        widget.targetLang.toUpperCase(), 
+        style: TextStyle(
+          color: primaryColor, 
+          fontWeight: FontWeight.bold, 
+          fontSize: 10
+        )
+      ),
     );
   }
 
@@ -189,14 +233,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black54, blurRadius: 20, offset: const Offset(0, 10))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black54, 
+            blurRadius: 20, 
+            offset: const Offset(0, 10)
+          )
+        ],
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
         child: Stack(
           alignment: Alignment.center,
           children: [
-            YoutubePlayer(controller: _syncPlayer.videoController, showVideoProgressIndicator: false),
+            YoutubePlayer(
+              controller: _syncPlayer.videoController, 
+              showVideoProgressIndicator: false
+            ),
             // Bloqueur d'interaction
             GestureDetector(
               onTap: () {},
@@ -217,7 +270,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [primaryColor.withOpacity(0.9), accentColor.withOpacity(0.9)],
+          colors: [
+            primaryColor.withOpacity(0.9), 
+            accentColor.withOpacity(0.9)
+          ],
         ),
       ),
       child: Column(
@@ -225,11 +281,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(_formatDuration(_currentPosition), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
+              Text(
+                _formatDuration(_currentPosition), 
+                style: const TextStyle(
+                  color: Colors.white, 
+                  fontWeight: FontWeight.w500
+                )
+              ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(color: Colors.black26, borderRadius: BorderRadius.circular(8)),
-                child: Text('Chunk ${_syncPlayer.currentChunkIndex + 1}/${_totalChunks}', style: const TextStyle(color: Colors.white, fontSize: 11)),
+                decoration: BoxDecoration(
+                  color: Colors.black26, 
+                  borderRadius: BorderRadius.circular(8)
+                ),
+                child: Text(
+                  'Chunk ${_syncPlayer.currentChunkIndex + 1}/${_totalChunks}', 
+                  style: const TextStyle(color: Colors.white, fontSize: 11)
+                ),
               ),
             ],
           ),
@@ -237,10 +305,146 @@ class _PlayerScreenState extends State<PlayerScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              _controlButton(Icons.skip_previous_rounded, _syncPlayer.canNavigatePrevious, _syncPlayer.previousChunk),
+              _controlButton(
+                Icons.skip_previous_rounded, 
+                _syncPlayer.canNavigatePrevious, 
+                _syncPlayer.previousChunk
+              ),
               _playPauseButton(),
-              _controlButton(Icons.skip_next_rounded, _syncPlayer.canNavigateNext, _syncPlayer.nextChunk),
+              _controlButton(
+                Icons.skip_next_rounded, 
+                _syncPlayer.canNavigateNext, 
+                _syncPlayer.nextChunk
+              ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ NOUVEAU : Widget Contrôles Volume
+  Widget _buildVolumeControls() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white10, width: 0.5),
+      ),
+      child: Column(
+        children: [
+          // Volume Audio Traduit
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: primaryColor.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.translate_rounded, 
+                  color: primaryColor, 
+                  size: 18
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Text(
+                'Traduit',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderThemeData(
+                    trackHeight: 3,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                  ),
+                  child: Slider(
+                    value: _syncPlayer.translatedVolume,
+                    min: 0.0,
+                    max: 1.0,
+                    activeColor: primaryColor,
+                    inactiveColor: Colors.white24,
+                    onChanged: (value) {
+                      _syncPlayer.setTranslatedVolume(value);
+                      setState(() {});
+                    },
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 38,
+                child: Text(
+                  '${(_syncPlayer.translatedVolume * 100).toInt()}%',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.right,
+                ),
+              ),
+            ],
+          ),
+          
+          const SizedBox(height: 12),
+          
+          // Toggle Audio Original
+          InkWell(
+            onTap: () {
+              _syncPlayer.toggleOriginalAudio();
+              setState(() {});
+            },
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+              decoration: BoxDecoration(
+                color: _syncPlayer.originalMuted 
+                  ? Colors.white10
+                  : Colors.greenAccent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _syncPlayer.originalMuted 
+                    ? Colors.white24
+                    : Colors.greenAccent.withOpacity(0.5),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    _syncPlayer.originalMuted 
+                      ? Icons.volume_off_rounded 
+                      : Icons.volume_up_rounded,
+                    color: _syncPlayer.originalMuted 
+                      ? Colors.white54
+                      : Colors.greenAccent,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _syncPlayer.originalMuted 
+                      ? 'Audio original coupé' 
+                      : 'Audio original actif',
+                    style: TextStyle(
+                      color: _syncPlayer.originalMuted 
+                        ? Colors.white54
+                        : Colors.greenAccent,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
@@ -251,9 +455,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return GestureDetector(
       onTap: () => _syncPlayer.playPause(),
       child: Container(
-        height: 65, width: 65,
-        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 15, offset: Offset(0, 5))]),
-        child: Icon(_isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, size: 45, color: primaryColor),
+        height: 65, 
+        width: 65,
+        decoration: const BoxDecoration(
+          color: Colors.white, 
+          shape: BoxShape.circle, 
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black26, 
+              blurRadius: 15, 
+              offset: Offset(0, 5)
+            )
+          ]
+        ),
+        child: Icon(
+          _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded, 
+          size: 45, 
+          color: primaryColor
+        ),
       ),
     );
   }
@@ -273,16 +492,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
         children: [
           Row(
             children: [
-              if (_isTranslating) const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Colors.white54))),
+              if (_isTranslating) 
+                const SizedBox(
+                  width: 12, 
+                  height: 12, 
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2, 
+                    valueColor: AlwaysStoppedAnimation(Colors.white54)
+                  )
+                ),
               const SizedBox(width: 8),
-              Expanded(child: Text(_status, style: const TextStyle(color: Colors.white70, fontSize: 12))),
-              Text('$_progress%', style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
+              Expanded(
+                child: Text(
+                  _status, 
+                  style: const TextStyle(color: Colors.white70, fontSize: 12)
+                )
+              ),
+              Text(
+                '$_progress%', 
+                style: const TextStyle(
+                  color: Colors.white70, 
+                  fontSize: 12, 
+                  fontWeight: FontWeight.bold
+                )
+              ),
             ],
           ),
           const SizedBox(height: 6),
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
-            child: LinearProgressIndicator(value: _progress / 100, minHeight: 4, backgroundColor: Colors.white10, valueColor: AlwaysStoppedAnimation(primaryColor)),
+            child: LinearProgressIndicator(
+              value: _progress / 100, 
+              minHeight: 4, 
+              backgroundColor: Colors.white10, 
+              valueColor: AlwaysStoppedAnimation(primaryColor)
+            ),
           ),
         ],
       ),
@@ -294,10 +538,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       width: double.infinity,
       decoration: const BoxDecoration(
         color: Color(0xFF1E293B),
-        borderRadius: BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30)),
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(30), 
+          topRight: Radius.circular(30)
+        ),
       ),
       child: ClipRRect(
-        borderRadius: const BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30)),
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(30), 
+          topRight: Radius.circular(30)
+        ),
         child: TranscriptView(transcripts: _transcripts),
       ),
     );
@@ -312,11 +562,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(primaryColor)),
+              CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation(primaryColor)
+              ),
               const SizedBox(height: 24),
-              const Text('Préparation de la traduction...', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              const Text(
+                'Préparation de la traduction...', 
+                style: TextStyle(
+                  color: Colors.white, 
+                  fontSize: 16, 
+                  fontWeight: FontWeight.bold
+                )
+              ),
               const SizedBox(height: 8),
-              Text('Chunk 1 en cours de traitement', style: TextStyle(color: Colors.blueGrey[300], fontSize: 13)),
+              Text(
+                'Chunk 1 en cours de traitement', 
+                style: TextStyle(color: Colors.blueGrey[300], fontSize: 13)
+              ),
             ],
           ),
         ),
@@ -325,7 +587,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   String _formatDuration(Duration d) {
-    return "${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:${d.inSeconds.remainder(60).toString().padLeft(2, '0')}";
+    return "${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:"
+           "${d.inSeconds.remainder(60).toString().padLeft(2, '0')}";
   }
 
   @override

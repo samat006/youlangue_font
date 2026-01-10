@@ -23,10 +23,16 @@ class IndexedAudioChunk {
 
 class SynchronizedPlayerService {
   late YoutubePlayerController videoController;
-  final AudioPlayer _audioPlayer = AudioPlayer();
+  final AudioPlayer _translatedAudioPlayer = AudioPlayer();
   
   final List<IndexedAudioChunk> _audioIndex = [];
   ConcatenatingAudioSource? _playlist;
+  
+  // ✅ Stocker les positions réelles de début de chaque chunk
+  final List<double> _chunkStartPositions = [];
+  
+  double _translatedVolume = 1.0;
+  bool _originalMuted = false;
   
   bool _isSyncing = false;
   Timer? _syncTimer;
@@ -37,7 +43,7 @@ class SynchronizedPlayerService {
   bool _hasStarted = false;
   int _currentChunkIndex = 0;
   int _totalChunks = 0;
-  double _chunkDuration = 5.0;
+  double _chunkDuration = 10.0;
   
   bool _wasPlaying = false;
   double _lastVideoPosition = 0.0;
@@ -49,6 +55,8 @@ class SynchronizedPlayerService {
   int get currentChunkIndex => _currentChunkIndex;
   int get totalChunks => _totalChunks;
   int get availableChunks => _audioIndex.length;
+  double get translatedVolume => _translatedVolume;
+  bool get originalMuted => _originalMuted;
   
   bool get canNavigateNext => _hasStarted && _currentChunkIndex < _audioIndex.length - 1;
   bool get canNavigatePrevious => _hasStarted && _currentChunkIndex > 0;
@@ -58,7 +66,7 @@ class SynchronizedPlayerService {
       initialVideoId: videoId,
       flags: YoutubePlayerFlags(
         autoPlay: false,
-        mute: true,
+        mute: false,
         enableCaption: false,
         controlsVisibleAtStart: false,
         hideControls: true,
@@ -68,6 +76,7 @@ class SynchronizedPlayerService {
       ),
     );
     
+    _translatedAudioPlayer.setVolume(_translatedVolume);
     _startAggressiveSync();
   }
   
@@ -77,6 +86,24 @@ class SynchronizedPlayerService {
     print('📊 Total: $_totalChunks chunks (${chunkDuration}s/chunk)');
   }
   
+  Future<void> setTranslatedVolume(double volume) async {
+    _translatedVolume = volume.clamp(0.0, 1.0);
+    await _translatedAudioPlayer.setVolume(_translatedVolume);
+    print('🔊 Volume traduit: ${(_translatedVolume * 100).toInt()}%');
+  }
+  
+  Future<void> toggleOriginalAudio() async {
+    _originalMuted = !_originalMuted;
+    
+    if (_originalMuted) {
+      videoController.mute();
+      print('🔇 Audio original coupé');
+    } else {
+      videoController.unMute();
+      print('🔊 Audio original activé');
+    }
+  }
+  
   void _startAggressiveSync() {
     _syncTimer = Timer.periodic(Duration(milliseconds: 200), (timer) {
       if (_isDisposed) {
@@ -84,27 +111,24 @@ class SynchronizedPlayerService {
         return;
       }
       
-      // ✅ RESPECTER _isSyncing
       if (_isSyncing) return;
-      
       if (!_hasStarted) return;
       
       _checkPlayPauseState();
       _checkPositionJump();
-      _checkDrift();
       _updateCurrentChunk();
     });
   }
   
   void _checkPlayPauseState() {
     final isNowPlaying = videoController.value.isPlaying;
-    final audioIsPlaying = _audioPlayer.playing;
+    final audioIsPlaying = _translatedAudioPlayer.playing;
     
     if (isNowPlaying != _wasPlaying) {
       if (isNowPlaying && !audioIsPlaying) {
-        _audioPlayer.play();
+        _translatedAudioPlayer.play();
       } else if (!isNowPlaying && audioIsPlaying) {
-        _audioPlayer.pause();
+        _translatedAudioPlayer.pause();
       }
       _wasPlaying = isNowPlaying;
     }
@@ -114,26 +138,12 @@ class SynchronizedPlayerService {
     final currentVideoPos = videoController.value.position.inSeconds.toDouble();
     final positionDiff = (currentVideoPos - _lastVideoPosition).abs();
     
-    if (positionDiff > 2.0) {
-      print('🎯 Jump détecté: ${_lastVideoPosition.toStringAsFixed(1)}s → ${currentVideoPos.toStringAsFixed(1)}s');
+    if (positionDiff > 5.0) {
+      print('🎯 Jump: ${_lastVideoPosition.toStringAsFixed(1)}s → ${currentVideoPos.toStringAsFixed(1)}s');
       _syncAudioToVideoPosition(currentVideoPos);
     }
     
     _lastVideoPosition = currentVideoPos;
-  }
-  
-  void _checkDrift() {
-    if (!videoController.value.isPlaying) return;
-    if (_playlist == null) return;
-    
-    final videoPos = videoController.value.position.inSeconds.toDouble();
-    final audioPos = _audioPlayer.position.inSeconds.toDouble();
-    final drift = (videoPos - audioPos).abs();
-    
-    if (drift > 1.5) {
-      print('⚠️ Drift: ${drift.toStringAsFixed(1)}s');
-      _syncAudioToVideoPosition(videoPos);
-    }
   }
   
   void _updateCurrentChunk() {
@@ -148,45 +158,60 @@ class SynchronizedPlayerService {
     }
   }
   
- // lib/data/services/synchronized_player_service.dart
-
-// MODIFIER addAudioChunk pour voir les timestamps
-
-Future<void> addAudioChunk(AudioChunk chunk) async {
-  if (chunk.data.isEmpty || _isDisposed) return;
-  
-  try {
-    final bytes = base64.decode(chunk.data);
+  Future<void> addAudioChunk(AudioChunk chunk) async {
+    if (chunk.data.isEmpty || _isDisposed) return;
     
-    _audioIndex.add(IndexedAudioChunk(
-      bytes: bytes,
-      timestampStart: chunk.timestampStart,
-      timestampEnd: chunk.timestampEnd,
-      sequence: chunk.sequence,
-    ));
-    
-    // ✅ AFFICHER LES TIMESTAMPS
-    print('📦 Chunk #${chunk.sequence + 1} | START: ${chunk.timestampStart.toStringAsFixed(1)}s | END: ${chunk.timestampEnd.toStringAsFixed(1)}s | Total: ${_audioIndex.length}');
-    
-    if (_audioIndex.length == 1) {
-      await _buildAudioPlaylist();
-      _hasFirstChunk = true;
-      print('✅ Premier chunk prêt');
-    } else if (_playlist != null) {
-      await _playlist!.add(_BytesAudioSource(bytes));
+    try {
+      final bytes = base64.decode(chunk.data);
+      
+      _audioIndex.add(IndexedAudioChunk(
+        bytes: bytes,
+        timestampStart: chunk.timestampStart,
+        timestampEnd: chunk.timestampEnd,
+        sequence: chunk.sequence,
+      ));
+      
+      print('📦 Chunk #${chunk.sequence + 1} | ${chunk.timestampStart.toStringAsFixed(1)}s-${chunk.timestampEnd.toStringAsFixed(1)}s');
+      
+      if (_audioIndex.length == 1) {
+        await _buildAudioPlaylist();
+        _hasFirstChunk = true;
+        
+        // ✅ Stocker position du premier chunk
+        _chunkStartPositions.add(0.0);
+        
+        print('✅ Premier chunk prêt');
+      } else if (_playlist != null) {
+        // ✅ ATTENDRE que le chunk soit ajouté à la playlist
+        await _playlist!.add(_BytesAudioSource(bytes));
+        
+        // ✅ Puis obtenir la durée totale mise à jour
+        await Future.delayed(Duration(milliseconds: 100));
+        
+        final currentDuration = _translatedAudioPlayer.duration;
+        if (currentDuration != null) {
+          final realPosition = currentDuration.inMilliseconds / 1000.0;
+          _chunkStartPositions.add(realPosition);
+          print('📍 Position réelle chunk ${_audioIndex.length}: ${realPosition.toStringAsFixed(1)}s');
+        } else {
+          // Fallback : estimation
+          final estimatedPos = (_audioIndex.length - 1) * _chunkDuration;
+          _chunkStartPositions.add(estimatedPos);
+          print('⚠️ Estimation position chunk ${_audioIndex.length}: ${estimatedPos.toStringAsFixed(1)}s');
+        }
+      }
+      
+    } catch (e) {
+      print('❌ Erreur chunk: $e');
     }
-    
-  } catch (e) {
-    print('❌ Erreur chunk: $e');
   }
-}
   
   Future<void> _buildAudioPlaylist() async {
     try {
       _playlist = ConcatenatingAudioSource(
         children: [_BytesAudioSource(_audioIndex[0].bytes)],
       );
-      await _audioPlayer.setAudioSource(_playlist!);
+      await _translatedAudioPlayer.setAudioSource(_playlist!);
       print('🎵 Playlist OK');
     } catch (e) {
       print('❌ Erreur playlist: $e');
@@ -204,12 +229,12 @@ Future<void> addAudioChunk(AudioChunk chunk) async {
     _isSyncing = true;
     
     videoController.play();
-    print('▶️ Vidéo');
+    print('▶️ Vidéo + audio original');
     
     await Future.delayed(Duration(milliseconds: 200));
     
-    await _audioPlayer.play();
-    print('▶️ Audio');
+    await _translatedAudioPlayer.play();
+    print('▶️ Audio traduit');
     
     _wasPlaying = true;
     _isSyncing = false;
@@ -217,7 +242,7 @@ Future<void> addAudioChunk(AudioChunk chunk) async {
   
   void markTranslationComplete() {
     _translationComplete = true;
-    print('✅ Traduction OK');
+    print('✅ Traduction complète');
   }
   
   Future<void> nextChunk() async {
@@ -240,71 +265,68 @@ Future<void> addAudioChunk(AudioChunk chunk) async {
     await _seekToChunk(_currentChunkIndex - 1);
   }
   
-Future<void> _seekToChunk(int chunkIndex) async {
-  if (chunkIndex < 0 || chunkIndex >= _audioIndex.length) {
-    print('⚠️ Index invalide: $chunkIndex / ${_audioIndex.length}');
-    return;
+  Future<void> _seekToChunk(int chunkIndex) async {
+    if (chunkIndex < 0 || chunkIndex >= _audioIndex.length) return;
+    
+    final chunk = _audioIndex[chunkIndex];
+    print('🎯 === SEEK CHUNK ${chunkIndex + 1}/${_audioIndex.length} ===');
+    
+    _isSyncing = true;
+    
+    final wasPlayingBefore = videoController.value.isPlaying;
+    
+    // Pause tout
+    if (wasPlayingBefore) {
+      videoController.pause();
+      await _translatedAudioPlayer.pause();
+      await Future.delayed(Duration(milliseconds: 200));
+    }
+    
+    // Seek vidéo
+    final targetVideoPos = Duration(milliseconds: (chunk.timestampStart * 1000).toInt());
+    videoController.seekTo(targetVideoPos);
+    print('📹 Vidéo → ${chunk.timestampStart.toStringAsFixed(1)}s');
+    
+    await Future.delayed(Duration(milliseconds: 800));
+    
+    // ✅ Seek audio avec position réelle stockée
+    double targetAudioPos;
+    if (chunkIndex < _chunkStartPositions.length) {
+      targetAudioPos = _chunkStartPositions[chunkIndex];
+      print('🎵 Audio → ${targetAudioPos.toStringAsFixed(1)}s (position réelle)');
+    } else {
+      // Fallback
+      targetAudioPos = chunkIndex * _chunkDuration;
+      print('⚠️ Audio → ${targetAudioPos.toStringAsFixed(1)}s (estimation)');
+    }
+    
+    try {
+      await _translatedAudioPlayer.seek(
+        Duration(milliseconds: (targetAudioPos * 1000).toInt())
+      );
+      print('✅ Audio positionné');
+    } catch (e) {
+      print('❌ Erreur seek audio: $e');
+    }
+    
+    _lastVideoPosition = chunk.timestampStart;
+    _currentChunkIndex = chunkIndex;
+    
+    await Future.delayed(Duration(milliseconds: 500));
+    
+    // Reprendre
+    if (wasPlayingBefore) {
+      videoController.play();
+      await Future.delayed(Duration(milliseconds: 200));
+      await _translatedAudioPlayer.play();
+      print('▶️ Reprise lecture');
+    }
+    
+    await Future.delayed(Duration(milliseconds: 500));
+    
+    _isSyncing = false;
+    print('✅ === SEEK OK ===\n');
   }
-  
-  final chunk = _audioIndex[chunkIndex];
-  
-  // ✅ AFFICHER LE CHUNK QU'ON RÉCUPÈRE
-  print('\n🎯 === SEEK CHUNK ${chunkIndex + 1}/${_audioIndex.length} ===');
-  print('📦 Chunk récupéré: START=${chunk.timestampStart.toStringAsFixed(1)}s END=${chunk.timestampEnd.toStringAsFixed(1)}s');
-  
-  // 1. BLOQUER SYNC
-  _isSyncing = true;
-  print('🔒 Sync OFF');
-  
-  // 2. ÉTAT
-  final wasPlayingBefore = videoController.value.isPlaying;
-  
-  // 3. PAUSE
-  if (wasPlayingBefore) {
-    videoController.pause();
-    await _audioPlayer.pause();
-    print('⏸️ Pause');
-    await Future.delayed(Duration(milliseconds: 150));
-  }
-  
-  // 4. SEEK VIDÉO
-  final targetPos = Duration(milliseconds: (chunk.timestampStart * 1000).toInt());
-  print('🎬 Calcul position: ${chunk.timestampStart}s * 1000 = ${chunk.timestampStart * 1000}ms');
-  videoController.seekTo(targetPos);
-  print('📹 Vidéo seek → ${chunk.timestampStart.toStringAsFixed(1)}s');
-  
-  // 5. ATTENDRE
-  await Future.delayed(Duration(milliseconds: 500));
-  
-  // 6. UPDATE POSITION
-  _lastVideoPosition = chunk.timestampStart;
-  _currentChunkIndex = chunkIndex;
-  print('📍 lastVideoPosition = ${_lastVideoPosition.toStringAsFixed(1)}s');
-  print('📍 currentChunkIndex = ${_currentChunkIndex + 1}');
-  
-  // 7. SYNC AUDIO
-  print('🎵 Sync audio vers ${chunk.timestampStart.toStringAsFixed(1)}s...');
-  await _syncAudioToVideoPosition(chunk.timestampStart);
-  
-  // 8. ATTENDRE
-  await Future.delayed(Duration(milliseconds: 300));
-  
-  // 9. REPRENDRE
-  if (wasPlayingBefore) {
-    videoController.play();
-    await Future.delayed(Duration(milliseconds: 150));
-    await _audioPlayer.play();
-    print('▶️ Play');
-  }
-  
-  // 10. ATTENDRE
-  await Future.delayed(Duration(milliseconds: 300));
-  
-  // 11. DÉBLOQUER
-  _isSyncing = false;
-  print('🔓 Sync ON');
-  print('✅ === SEEK OK ===\n');
-}
   
   Future<void> seekTo(Duration position) async {
     if (!_translationComplete) return;
@@ -316,80 +338,53 @@ Future<void> _seekToChunk(int chunkIndex) async {
     await _seekToChunk(targetChunkIndex);
   }
   
- Future<void> _syncAudioToVideoPosition(double targetSeconds) async {
-  if (_audioIndex.isEmpty || _playlist == null) {
-    print('⚠️ Pas de chunks ou playlist');
-    return;
-  }
-  
-  print('🔍 Recherche chunk pour position: ${targetSeconds.toStringAsFixed(1)}s');
-  print('🔍 Chunks disponibles: ${_audioIndex.length}');
-  
-  int targetChunkIndex = -1;
-  double offsetInTargetChunk = 0.0;
-  
-  // ✅ AFFICHER TOUS LES CHUNKS
-  for (int i = 0; i < _audioIndex.length; i++) {
-    final c = _audioIndex[i];
-    print('   Chunk $i: ${c.timestampStart.toStringAsFixed(1)}s - ${c.timestampEnd.toStringAsFixed(1)}s');
-  }
-  
-  // Chercher le chunk correspondant
-  for (int i = 0; i < _audioIndex.length; i++) {
-    final chunk = _audioIndex[i];
+  Future<void> _syncAudioToVideoPosition(double targetSeconds) async {
+    if (_audioIndex.isEmpty || _playlist == null) return;
     
-    if (targetSeconds >= chunk.timestampStart && targetSeconds < chunk.timestampEnd) {
-      targetChunkIndex = i;
-      offsetInTargetChunk = targetSeconds - chunk.timestampStart;
-      print('✅ Trouvé: Chunk $i (offset: ${offsetInTargetChunk.toStringAsFixed(1)}s)');
-      break;
-    }
-  }
-  
-  // Si pas trouvé, prendre le plus proche
-  if (targetChunkIndex == -1) {
-    print('⚠️ Pas de match exact, recherche du plus proche...');
-    double minDistance = double.infinity;
+    int targetChunkIndex = -1;
+    double offsetInTargetChunk = 0.0;
+    
     for (int i = 0; i < _audioIndex.length; i++) {
       final chunk = _audioIndex[i];
-      final distance = (chunk.timestampStart - targetSeconds).abs();
-      print('   Chunk $i: distance = ${distance.toStringAsFixed(1)}s');
-      if (distance < minDistance) {
-        minDistance = distance;
+      
+      if (targetSeconds >= chunk.timestampStart && targetSeconds < chunk.timestampEnd) {
         targetChunkIndex = i;
-        offsetInTargetChunk = 0.0;
+        offsetInTargetChunk = targetSeconds - chunk.timestampStart;
+        break;
       }
     }
-    print('✅ Plus proche: Chunk $targetChunkIndex (distance: ${minDistance.toStringAsFixed(1)}s)');
-  }
-  
-  if (targetChunkIndex >= 0) {
-    // Calculer position audio totale
-    double totalAudioPosition = 0.0;
     
-    print('🧮 Calcul position audio:');
-    for (int i = 0; i < targetChunkIndex; i++) {
-      final chunk = _audioIndex[i];
-      final duration = chunk.timestampEnd - chunk.timestampStart;
-      totalAudioPosition += duration;
-      print('   + Chunk $i: ${duration.toStringAsFixed(1)}s → Total: ${totalAudioPosition.toStringAsFixed(1)}s');
+    if (targetChunkIndex == -1) {
+      double minDistance = double.infinity;
+      for (int i = 0; i < _audioIndex.length; i++) {
+        final chunk = _audioIndex[i];
+        final distance = (chunk.timestampStart - targetSeconds).abs();
+        if (distance < minDistance) {
+          minDistance = distance;
+          targetChunkIndex = i;
+          offsetInTargetChunk = 0.0;
+        }
+      }
     }
     
-    totalAudioPosition += offsetInTargetChunk;
-    print('   + Offset: ${offsetInTargetChunk.toStringAsFixed(1)}s → Total FINAL: ${totalAudioPosition.toStringAsFixed(1)}s');
-    
-    print('🎵 Audio seek → ${totalAudioPosition.toStringAsFixed(1)}s');
-    
-    try {
-      await _audioPlayer.seek(Duration(milliseconds: (totalAudioPosition * 1000).toInt()));
-      print('✅ Audio positionné');
-    } catch (e) {
-      print('❌ Erreur audio seek: $e');
+    if (targetChunkIndex >= 0) {
+      // ✅ Utiliser position réelle si disponible
+      double targetPosition;
+      if (targetChunkIndex < _chunkStartPositions.length) {
+        targetPosition = _chunkStartPositions[targetChunkIndex] + offsetInTargetChunk;
+      } else {
+        targetPosition = targetChunkIndex * _chunkDuration + offsetInTargetChunk;
+      }
+      
+      try {
+        await _translatedAudioPlayer.seek(
+          Duration(milliseconds: (targetPosition * 1000).toInt())
+        );
+      } catch (e) {
+        print('❌ Erreur sync: $e');
+      }
     }
-  } else {
-    print('❌ Aucun chunk trouvé !');
   }
-}
   
   Future<void> playPause() async {
     if (!_hasStarted) return;
@@ -407,7 +402,7 @@ Future<void> _seekToChunk(int chunkIndex) async {
     print('▶️ Play');
     _isSyncing = true;
     
-    await _audioPlayer.play();
+    await _translatedAudioPlayer.play();
     await Future.delayed(Duration(milliseconds: 50));
     videoController.play();
     
@@ -421,7 +416,7 @@ Future<void> _seekToChunk(int chunkIndex) async {
     
     videoController.pause();
     await Future.delayed(Duration(milliseconds: 50));
-    await _audioPlayer.pause();
+    await _translatedAudioPlayer.pause();
     
     _wasPlaying = false;
     _isSyncing = false;
@@ -437,7 +432,7 @@ Future<void> _seekToChunk(int chunkIndex) async {
     _isDisposed = true;
     _syncTimer?.cancel();
     videoController.dispose();
-    _audioPlayer.dispose();
+    _translatedAudioPlayer.dispose();
   }
 }
 
