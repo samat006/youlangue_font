@@ -31,7 +31,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   final WebSocketService _wsService = WebSocketService();
   late SynchronizedPlayerService _syncPlayer;
 
-  // États UI
   String _status = 'Connexion NeuralNet...';
   double _progress = 0.0;
   List<AudioChunk> _transcripts = [];
@@ -39,16 +38,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _waitingForFirstChunk = true;
   bool _isPlaying = false;
   
-  // État du panneau (Pliable)
   bool _isControlsExpanded = true;
 
-  // Volumes
   double _volTranslated = 1.0;
-  double _volOriginal = 0.5; // Mis à 50% pour tester l'effet
+  double _volOriginal = 0.5;
 
   Timer? _uiTimer;
 
-  // Couleurs YouTube "Cyber"
   final Color ytRed = const Color(0xFFFF0000);
   final Color ytBlack = const Color(0xFF0F0F0F);
 
@@ -65,7 +61,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _syncPlayer = SynchronizedPlayerService();
     _syncPlayer.initializeVideo(videoId!);
     
-    // Force les volumes au démarrage
     Future.delayed(Duration(seconds: 1), () {
       _syncPlayer.setTranslatedVolume(_volTranslated);
       _syncPlayer.setOriginalVolume(_volOriginal);
@@ -97,41 +92,73 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _handleWebSocketMessage(dynamic message) {
     if (!mounted) return;
+    
     try {
       final data = json.decode(message);
       final type = data['type'];
+      
+      print('📨 WebSocket: $type');
 
       switch (type) {
         case 'status':
           setState(() => _status = data['message']);
           break;
+          
         case 'translation_ready':
           _syncPlayer.setTotalChunks(
-              data['total_chunks'], (data['chunk_duration'] ?? 10.0).toDouble());
+            data['total_chunks'], 
+            (data['chunk_duration'] ?? 10.0).toDouble()
+          );
           break;
+          
+        case 'original_audio':
+          print('🎵 Audio original reçu: ${data['data'].length} chars');
+          _syncPlayer.loadOriginalAudio(data['data']);
+          setState(() => _status = '🎵 Audio original chargé');
+          break;
+          
         case 'audio_chunk':
           final chunk = AudioChunk.fromJson(data);
+          
           if (chunk.data.isNotEmpty) {
             _syncPlayer.addAudioChunk(chunk);
+            
             if (_waitingForFirstChunk && _syncPlayer.hasFirstChunk) {
+              print('✅ Premier chunk → Fermeture overlay');
               setState(() => _waitingForFirstChunk = false);
-              Future.delayed(const Duration(seconds: 1), () => _syncPlayer.startPlayback());
+              
+              Future.delayed(const Duration(seconds: 1), () {
+                if (mounted) {
+                  print('🎬 Démarrage lecture');
+                  _syncPlayer.startPlayback();
+                }
+              });
             }
           }
+          
           setState(() {
             _progress = (chunk.progress / 100);
             if (chunk.transcript.isNotEmpty) _transcripts.add(chunk);
           });
           break;
+          
         case 'translation_complete':
+          print('✅ Traduction complète');
           _syncPlayer.markTranslationComplete();
           setState(() {
             _status = "SYSTÈME PRÊT";
             _isTranslating = false;
           });
           break;
+          
+        case 'error':
+          print('❌ Erreur serveur: ${data['message']}');
+          setState(() => _status = 'Erreur: ${data['message']}');
+          break;
       }
-    } catch (e) { print(e); }
+    } catch (e) { 
+      print('❌ Erreur parsing: $e'); 
+    }
   }
 
   @override
@@ -140,7 +167,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       backgroundColor: ytBlack,
       body: Stack(
         children: [
-          // 1. Vidéo et Transcript (Fond)
           Column(
             children: [
               _buildImmersiveVideo(),
@@ -149,9 +175,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   color: ytBlack,
                   child: Stack(
                     children: [
-                      // Transcript avec effet de fade en bas
                       TranscriptView(transcripts: _transcripts),
-                      // Petit gradient pour cacher le bas du texte sous les contrôles
                       Align(
                         alignment: Alignment.bottomCenter,
                         child: Container(
@@ -172,25 +196,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ],
           ),
 
-          // 2. Header Flottant (Retour + Titre)
           Positioned(top: 0, left: 0, right: 0, child: _buildCyberHeader()),
 
-          // 3. Overlay Chargement
           if (_waitingForFirstChunk) _buildLoadingOverlay(),
 
-          // 4. LE DOCK DE CONTRÔLE PLIABLE
-          // On utilise AnimatedPositioned pour faire glisser le panneau
           AnimatedPositioned(
             duration: const Duration(milliseconds: 400),
             curve: Curves.fastOutSlowIn,
             left: 15,
             right: 15,
-            // Si déplié : à 20px du bas. Si plié : on le cache plus bas (mais on laisse un bout dépasser)
             bottom: _isControlsExpanded ? 20 : -260, 
             child: _buildCollapsibleDock(),
           ),
           
-          // 5. Bouton de réouverture (Visible seulement quand le dock est caché)
           if (!_isControlsExpanded)
             Positioned(
               bottom: 30,
@@ -210,7 +228,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // La petite "poignée" pour fermer/ouvrir
         GestureDetector(
           onTap: () => setState(() => _isControlsExpanded = !_isControlsExpanded),
           child: Container(
@@ -224,7 +241,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ),
         
-        // Le panneau principal
         ClipRRect(
           borderRadius: BorderRadius.circular(30),
           child: BackdropFilter(
@@ -242,13 +258,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Bouton pour fermer le panneau (Chevron)
                   GestureDetector(
                     onTap: () => setState(() => _isControlsExpanded = false),
                     child: Icon(Icons.keyboard_arrow_down, color: Colors.white54, size: 30),
                   ),
                   
-                  // 1. Barre de progression
                   if (_progress > 0)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -260,14 +274,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ),
                     ),
 
-                  // 2. MIXEUR AUDIO
                   _buildVolumeMixer(),
                   
                   const SizedBox(height: 15),
                   Divider(color: Colors.white.withOpacity(0.1), height: 1),
                   const SizedBox(height: 15),
 
-                  // 3. CONTRÔLES NAVIGATION
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -312,11 +324,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _buildVolumeMixer() {
     return Column(
       children: [
-        // Volume Traduit
         Row(
           children: [
             const Icon(Icons.record_voice_over, color: Colors.white, size: 18),
             const SizedBox(width: 10),
+            Text(
+              '${(_volTranslated * 100).toInt()}%',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
             Expanded(
               child: SliderTheme(
                 data: SliderThemeData(
@@ -329,6 +344,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 child: Slider(
                   value: _volTranslated,
                   onChanged: (val) {
+                    print('🔊 Slider traduit: ${(val * 100).toInt()}%');
                     setState(() => _volTranslated = val);
                     _syncPlayer.setTranslatedVolume(val);
                   },
@@ -338,11 +354,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ],
         ),
         const SizedBox(height: 10),
-        // Volume Original
         Row(
           children: [
             Icon(Icons.volume_up, color: ytRed, size: 18),
             const SizedBox(width: 10),
+            Text(
+              '${(_volOriginal * 100).toInt()}%',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
+            ),
             Expanded(
               child: SliderTheme(
                 data: SliderThemeData(
@@ -355,8 +374,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 child: Slider(
                   value: _volOriginal,
                   onChanged: (val) {
+                    print('🔊 Slider original: ${(val * 100).toInt()}%');
                     setState(() => _volOriginal = val);
-                    // Appel direct au service avec la nouvelle fonction robuste
                     _syncPlayer.setOriginalVolume(val);
                   },
                 ),
@@ -368,30 +387,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildImmersiveVideo() {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.40,
-      decoration: BoxDecoration(
-        boxShadow: [
-          BoxShadow(color: ytRed.withOpacity(0.1), blurRadius: 30, spreadRadius: 5),
-        ],
-      ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          YoutubePlayer(
-            controller: _syncPlayer.videoController,
-            showVideoProgressIndicator: false,
+ Widget _buildImmersiveVideo() {
+  return Container(
+    height: MediaQuery.of(context).size.height * 0.40,
+    decoration: BoxDecoration(
+      boxShadow: [
+        BoxShadow(color: ytRed.withOpacity(0.1), blurRadius: 30, spreadRadius: 5),
+      ],
+    ),
+    child: Stack(
+      alignment: Alignment.center,
+      children: [
+        YoutubePlayer(
+          controller: _syncPlayer.videoController,
+          showVideoProgressIndicator: false,
+        ),
+        // ✅ BLOQUER TOUTE INTERACTION
+        Positioned.fill(
+          child: Container(
+            color: Colors.transparent,
+            child: AbsorbPointer(
+              absorbing: true,  // ✅ BLOQUER TOUS LES GESTES
+              child: Container(),
+            ),
           ),
-          GestureDetector(
-            onTap: () => _syncPlayer.playPause(),
-            behavior: HitTestBehavior.opaque,
-            child: Container(color: Colors.transparent),
-          ),
-        ],
-      ),
-    );
-  }
+        ),
+      ],
+    ),
+  );
+}
 
   Widget _buildCyberHeader() {
     return ClipRRect(
@@ -446,6 +470,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    print('🗑️ Dispose PlayerScreen');
     _uiTimer?.cancel();
     _syncPlayer.dispose();
     _wsService.disconnect();

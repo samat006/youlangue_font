@@ -29,8 +29,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final Color ytSurface = const Color(0xFF272727);
 
   final List<Map<String, String>> _languages = [
-    {'code': 'wo', 'name': 'Wolof', 'flag': '🇸🇳'},
     {'code': 'fr', 'name': 'Français', 'flag': '🇫🇷'},
+    {'code': 'wo', 'name': 'Wolof', 'flag': '🇸🇳'},
     {'code': 'en', 'name': 'English', 'flag': '🇬🇧'},
     {'code': 'ar', 'name': 'العربية', 'flag': '🇸🇦'},
     {'code': 'es', 'name': 'Español', 'flag': '🇪🇸'},
