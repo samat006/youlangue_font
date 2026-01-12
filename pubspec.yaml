@@ -26,9 +26,11 @@ dependencies:
   youtube_explode_dart: ^2.1.0  # Pour recherche YouTube
   
   # Audio
-  just_audio: ^0.9.36
   audio_session: ^0.1.18
-  
+  audioplayers: ^5.2.1    # ✅ ALTERNATIVE
+  just_audio: ^0.9.42
+  path_provider: ^2.1.0
+
   # Storage
   shared_preferences: ^2.2.2
   
@@ -43,11 +45,18 @@ dependencies:
   file_picker: ^8.0.0
   path: ^1.9.0
   video_player: ^2.8.0  # ✅ NOUVEAU
+  
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: assets/images/voxtube_logo.png
 
 flutter:
   uses-material-design: true
@@ -55,3 +64,4 @@ flutter:
   assets:
     - assets/images/
     - assets/icons/
+

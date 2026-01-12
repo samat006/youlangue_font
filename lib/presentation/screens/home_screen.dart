@@ -63,7 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Icon(Icons.translate, color: ytRed, size: 28),
             const SizedBox(width: 10),
             const Text(
-              'Kaddu AI', 
+              'VoxTube', 
               style: TextStyle(
                 color: Colors.white, 
                 fontWeight: FontWeight.bold, 

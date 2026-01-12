@@ -58,7 +58,7 @@ class AboutScreen extends StatelessWidget {
             ),
 
             // 🎯 MISSION
-            _buildSectionTitle('🚀 Notre Mission'),
+            _buildSectionTitle(' Notre Mission'),
             _buildInfoCard(
               'VoxTube est une application innovante de traduction et de redoublage vocal des vidéos. '
               'Notre objectif est de rendre le contenu vidéo accessible à tous, en supprimant les barrières linguistiques, '

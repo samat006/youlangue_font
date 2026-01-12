@@ -93,9 +93,9 @@ BEGIN
             VALUE "FileDescription", "translateyoutube_flutter" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "translateyoutube_flutter" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.example. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 touba7G All rights reserved." "\0"
             VALUE "OriginalFilename", "translateyoutube_flutter.exe" "\0"
-            VALUE "ProductName", "translateyoutube_flutter" "\0"
+            VALUE "ProductName", "VoxTube" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

@@ -2,22 +2,27 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
-import 'package:flutter/foundation.dart'; // Pour ChangeNotifier
+import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
-import 'package:video_player/video_player.dart'; // Pour les fichiers uploadés/natifs
+import 'package:video_player/video_player.dart';
+import 'package:audio_session/audio_session.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/translation_model.dart';
 
 class IndexedAudioChunk {
   final Uint8List bytes;
+  final String? filePath;  // ✅ NOUVEAU : fichier sur disque (Android)
   final double timestampStart;
   final double timestampEnd;
   final int sequence;
   
   IndexedAudioChunk({
     required this.bytes,
+    this.filePath,
     required this.timestampStart,
     required this.timestampEnd,
     required this.sequence,
@@ -25,9 +30,8 @@ class IndexedAudioChunk {
 }
 
 class SynchronizedPlayerService extends ChangeNotifier {
-  // Contrôleurs
-  YoutubePlayerController? _ytController; // Ancien 'videoController', maintenant interne et nullable
-  VideoPlayerController? nativeVideoController; // Contrôleur pour les fichiers natifs/uploadés
+  YoutubePlayerController? _ytController;
+  VideoPlayerController? nativeVideoController;
   
   final AudioPlayer _translatedAudioPlayer = AudioPlayer();
   final AudioPlayer _originalAudioPlayer = AudioPlayer();
@@ -35,9 +39,11 @@ class SynchronizedPlayerService extends ChangeNotifier {
   final List<IndexedAudioChunk> _audioIndex = [];
   ConcatenatingAudioSource? _playlist;
   final List<double> _chunkStartPositions = [];
+  
+  Directory? _cacheDir;  // ✅ NOUVEAU
+  final List<String> _tempFiles = [];  // ✅ NOUVEAU : cleanup
 
-  // Indicateurs d'état
-  bool _isNativeVideoMode = false; // Vrai si c'est un fichier uploadé
+  bool _isNativeVideoMode = false;
   bool _isDisposed = false;
   bool _translationComplete = false;
   bool _originalAudioLoaded = false;
@@ -53,23 +59,16 @@ class SynchronizedPlayerService extends ChangeNotifier {
   Timer? _syncTimer;
   bool _lastVideoPlayingState = false;
   
-  // Getters
-  
-  // Expose le contrôleur YT si nécessaire (pour PlayerScreen qui utilise YoutubePlayer)
+  // Getters (inchangés)
   YoutubePlayerController get videoController => _ytController!; 
-  
-  // Expose le contrôleur natif (pour PlayerScreen qui utilise VideoPlayer)
   VideoPlayerController get localVideoController => nativeVideoController!;
   bool get isLocalVideoLoaded => nativeVideoController?.value.isInitialized ?? false;
-
   bool get isPlaying => _isNativeVideoMode 
     ? (nativeVideoController?.value.isPlaying ?? false)
     : (_ytController?.value.isPlaying ?? false);
-    
   Duration get position => _isNativeVideoMode 
     ? (nativeVideoController?.value.position ?? Duration.zero)
     : (_ytController?.value.position ?? Duration.zero);
-    
   bool get isNativeVideoMode => _isNativeVideoMode;
   bool get canSeek => _translationComplete;
   bool get hasFirstChunk => _hasFirstChunk;
@@ -81,8 +80,28 @@ class SynchronizedPlayerService extends ChangeNotifier {
   bool get canNavigateNext => _hasStarted && _currentChunkIndex < _audioIndex.length - 1;
   bool get canNavigatePrevious => _hasStarted && _currentChunkIndex > 0;
   
-  void initializeVideo(String videoId) {
-    _isNativeVideoMode = false; // Mode YouTube
+  // ✅ NOUVEAU : Init cache (Android uniquement)
+  Future<void> _initCacheIfNeeded() async {
+    if (Platform.isAndroid && _cacheDir == null) {
+      try {
+        final tempDir = await getTemporaryDirectory();
+        _cacheDir = Directory('${tempDir.path}/voxtube_audio');
+        if (!await _cacheDir!.exists()) {
+          await _cacheDir!.create(recursive: true);
+        }
+        print('📁 Cache Android: ${_cacheDir!.path}');
+      } catch (e) {
+        print('❌ Erreur cache: $e');
+      }
+    }
+  }
+  
+  void initializeVideo(String videoId) async {
+    _isNativeVideoMode = false;
+    
+    await _initCacheIfNeeded();  // ✅ NOUVEAU
+    _configureAudioSession();
+    
     _ytController = YoutubePlayerController(
       initialVideoId: videoId,
       flags: const YoutubePlayerFlags(
@@ -102,12 +121,14 @@ class SynchronizedPlayerService extends ChangeNotifier {
     
     _startPlayPauseSync();
   }
-  
-  // ✅ NOUVELLE MÉTHODE : Initialisation vidéo native
+
   Future<void> initializeNativeVideo(String videoUrl) async {
     _isNativeVideoMode = true;
     
     print('🎬 Initialisation vidéo native: $videoUrl');
+    
+    await _initCacheIfNeeded();  // ✅ NOUVEAU
+    await _configureAudioSession();
     
     nativeVideoController = VideoPlayerController.networkUrl(
       Uri.parse(videoUrl),
@@ -116,11 +137,10 @@ class SynchronizedPlayerService extends ChangeNotifier {
     try {
       await nativeVideoController!.initialize();
       await nativeVideoController!.setVolume(0.0);
-      notifyListeners(); // Informe PlayerScreen que la vidéo est chargée
+      notifyListeners();
       print('✅ Vidéo native initialisée');
     } catch (e) {
-      print('❌ Erreur chargement vidéo native: $e');
-      // Si la vidéo ne charge pas, elle reste en mode "audio seulement" (isLocalVideoLoaded = false)
+      print('❌ Erreur vidéo: $e');
       nativeVideoController = null;
     }
     
@@ -129,7 +149,7 @@ class SynchronizedPlayerService extends ChangeNotifier {
     
     _startPlayPauseSync();
   }
-
+  
   void _startPlayPauseSync() {
     _syncTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
       if (_isDisposed) {
@@ -139,7 +159,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
       
       if (!_hasStarted) return;
       
-      // Utilisation du getter isPlaying unifié
       final videoPlaying = isPlaying; 
       
       if (videoPlaying != _lastVideoPlayingState) {
@@ -174,17 +193,34 @@ class SynchronizedPlayerService extends ChangeNotifier {
     print('📊 Total: $_totalChunks chunks (${chunkDuration}s/chunk)');
   }
   
+  // ✅ MODIFIÉ : Audio original (Android = fichier, iOS = StreamAudioSource)
   Future<void> loadOriginalAudio(String base64Data) async {
     try {
       print('🎵 Chargement audio original...');
       final bytes = base64.decode(base64Data);
-      final source = _BytesAudioSource(bytes);
       
-      await _originalAudioPlayer.setAudioSource(source);
+      if (Platform.isAndroid) {
+        // ✅ ANDROID : Écrire sur disque
+        await _initCacheIfNeeded();
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final file = File('${_cacheDir!.path}/original_$timestamp.mp3');
+        await file.writeAsBytes(bytes);
+        _tempFiles.add(file.path);
+        
+        await _originalAudioPlayer.setAudioSource(
+          AudioSource.uri(Uri.file(file.path))
+        );
+        print('✅ Audio original chargé (Android fichier): ${file.path}');
+      } else {
+        // ✅ iOS : StreamAudioSource (comme avant)
+        final source = _BytesAudioSource(bytes);
+        await _originalAudioPlayer.setAudioSource(source);
+        print('✅ Audio original chargé (iOS mémoire): ${bytes.length} bytes');
+      }
+      
       await _originalAudioPlayer.setVolume(_originalVolume);
-      
       _originalAudioLoaded = true;
-      print('✅ Audio original chargé (${bytes.length} bytes)');
+      
     } catch (e) {
       print('❌ Erreur audio original: $e');
     }
@@ -202,14 +238,28 @@ class SynchronizedPlayerService extends ChangeNotifier {
     print('🔊 Volume original: ${(_originalVolume * 100).toInt()}%');
   }
   
+  // ✅ MODIFIÉ : Chunks (Android = fichiers, iOS = StreamAudioSource)
   Future<void> addAudioChunk(AudioChunk chunk) async {
     if (chunk.data.isEmpty || _isDisposed) return;
     
     try {
       final bytes = base64.decode(chunk.data);
+      String? filePath;
+      
+      if (Platform.isAndroid) {
+        // ✅ ANDROID : Écrire chunk sur disque
+        await _initCacheIfNeeded();
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final file = File('${_cacheDir!.path}/chunk_${chunk.sequence}_$timestamp.mp3');
+        await file.writeAsBytes(bytes);
+        filePath = file.path;
+        _tempFiles.add(filePath);
+        print('💾 Chunk #${chunk.sequence + 1} écrit: $filePath');
+      }
       
       _audioIndex.add(IndexedAudioChunk(
         bytes: bytes,
+        filePath: filePath,
         timestampStart: chunk.timestampStart,
         timestampEnd: chunk.timestampEnd,
         sequence: chunk.sequence,
@@ -231,7 +281,16 @@ class SynchronizedPlayerService extends ChangeNotifier {
         }
         
         _chunkStartPositions.add(cumulativePosition);
-        await _playlist!.add(_BytesAudioSource(bytes));
+        
+        if (Platform.isAndroid) {
+          // ✅ ANDROID : Ajouter URI
+          await _playlist!.add(
+            AudioSource.uri(Uri.file(_audioIndex.last.filePath!))
+          );
+        } else {
+          // ✅ iOS : Ajouter StreamAudioSource
+          await _playlist!.add(_BytesAudioSource(bytes));
+        }
       }
       
     } catch (e) {
@@ -239,17 +298,36 @@ class SynchronizedPlayerService extends ChangeNotifier {
     }
   }
   
+  // ✅ MODIFIÉ : Playlist (Android = URI, iOS = StreamAudioSource)
   Future<void> _buildAudioPlaylist() async {
     try {
-      _playlist = ConcatenatingAudioSource(
-        children: [_BytesAudioSource(_audioIndex[0].bytes)],
-      );
+      final firstChunk = _audioIndex[0];
+      
+      if (Platform.isAndroid) {
+        // ✅ ANDROID : Playlist avec URI
+        _playlist = ConcatenatingAudioSource(
+          useLazyPreparation: true,
+          children: [
+            AudioSource.uri(Uri.file(firstChunk.filePath!))
+          ],
+        );
+        print('🎵 Playlist créée (Android URI)');
+      } else {
+        // ✅ iOS : Playlist avec StreamAudioSource
+        _playlist = ConcatenatingAudioSource(
+          children: [_BytesAudioSource(firstChunk.bytes)],
+        );
+        print('🎵 Playlist créée (iOS mémoire)');
+      }
+      
       await _translatedAudioPlayer.setAudioSource(_playlist!);
-      print('🎵 Playlist créée');
+      
     } catch (e) {
       print('❌ Erreur playlist: $e');
     }
   }
+  
+  // TOUTES LES AUTRES MÉTHODES RESTENT IDENTIQUES
   
   Future<void> startPlayback() async {
     if (_hasStarted) {
@@ -265,7 +343,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
     _hasStarted = true;
     
     try {
-      // 1. POSITIONNER À ZÉRO
       print('1️⃣ Positionnement à 0...');
       await _translatedAudioPlayer.seek(Duration.zero);
       if (_originalAudioLoaded) {
@@ -280,7 +357,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
       
       await Future.delayed(const Duration(milliseconds: 500));
       
-      // 2. DÉMARRER AUDIOS
       print('2️⃣ Démarrage audios...');
       await _translatedAudioPlayer.play();
       print('   ✅ Audio traduit démarré');
@@ -294,7 +370,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
       
       await Future.delayed(const Duration(milliseconds: 300));
       
-      // 3. DÉMARRER VIDÉO
       print('3️⃣ Démarrage vidéo...');
       if (_isNativeVideoMode) {
         await nativeVideoController?.play();
@@ -332,7 +407,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
     
     print('\n▶️ ===== PLAY =====');
     
-    // Vidéo
     if (_isNativeVideoMode) {
       await nativeVideoController?.play();
     } else {
@@ -340,7 +414,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
     }
     print('▶️ Vidéo');
     
-    // Audios
     await _translatedAudioPlayer.play();
     print('▶️ Audio traduit');
     
@@ -359,7 +432,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
   Future<void> pause() async {
     print('\n⏸️ ===== PAUSE =====');
     
-    // Vidéo d'abord
     if (_isNativeVideoMode) {
       await nativeVideoController?.pause();
     } else {
@@ -370,7 +442,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
     
     await Future.delayed(const Duration(milliseconds: 100));
     
-    // Audios ensuite
     await _translatedAudioPlayer.pause();
     print('⏸️ Audio traduit');
     
@@ -410,7 +481,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
     
     final wasPlaying = isPlaying;
     
-    // 1. PAUSE
     if (wasPlaying) {
       if (_isNativeVideoMode) {
         await nativeVideoController?.pause();
@@ -423,7 +493,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
       await Future.delayed(const Duration(milliseconds: 200));
     }
     
-    // 2. SEEK
     final duration = Duration(milliseconds: (chunk.timestampStart * 1000).toInt());
 
     if (_isNativeVideoMode) {
@@ -448,7 +517,6 @@ class SynchronizedPlayerService extends ChangeNotifier {
     
     await Future.delayed(const Duration(milliseconds: 500));
     
-    // 3. REPRENDRE
     if (wasPlaying) {
       await _translatedAudioPlayer.play();
       if (_originalAudioLoaded) await _originalAudioPlayer.play();
@@ -480,13 +548,35 @@ class SynchronizedPlayerService extends ChangeNotifier {
     await _seekToChunk(0);
   }
   
+  // ✅ NOUVEAU : Cleanup fichiers temporaires (Android)
+  Future<void> _cleanupTempFiles() async {
+    if (Platform.isAndroid && _tempFiles.isNotEmpty) {
+      try {
+        print('🗑️ Nettoyage ${_tempFiles.length} fichiers Android...');
+        for (final path in _tempFiles) {
+          try {
+            final file = File(path);
+            if (await file.exists()) {
+              await file.delete();
+            }
+          } catch (e) {
+            // Ignorer erreurs individuelles
+          }
+        }
+        _tempFiles.clear();
+        print('✅ Nettoyage OK');
+      } catch (e) {
+        print('⚠️ Erreur cleanup: $e');
+      }
+    }
+  }
+  
   @override
   void dispose() {
     print('🗑️ Dispose PlayerService');
     _isDisposed = true;
     _syncTimer?.cancel();
     
-    // Dispose conditionnel
     if (_isNativeVideoMode) {
       nativeVideoController?.dispose();
     } else {
@@ -495,10 +585,41 @@ class SynchronizedPlayerService extends ChangeNotifier {
     
     _translatedAudioPlayer.dispose();
     _originalAudioPlayer.dispose();
+    
+    // ✅ Cleanup async
+    _cleanupTempFiles();
+    
     super.dispose();
+  }
+
+  Future<void> _configureAudioSession() async {
+    try {
+      print('🔊 Configuration audio session...');
+      
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playback,
+        avAudioSessionCategoryOptions: AVAudioSessionCategoryOptions.mixWithOthers,
+        avAudioSessionMode: AVAudioSessionMode.moviePlayback,
+        avAudioSessionRouteSharingPolicy: AVAudioSessionRouteSharingPolicy.defaultPolicy,
+        avAudioSessionSetActiveOptions: AVAudioSessionSetActiveOptions.none,
+        androidAudioAttributes: AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.movie,
+          flags: AndroidAudioFlags.none,
+          usage: AndroidAudioUsage.media,
+        ),
+        androidAudioFocusGainType: AndroidAudioFocusGainType.gain,
+        androidWillPauseWhenDucked: false,
+      ));
+      
+      print('✅ Audio session configurée');
+    } catch (e) {
+      print('⚠️ Erreur config audio: $e');
+    }
   }
 }
 
+// ✅ StreamAudioSource GARDÉ pour iOS
 class _BytesAudioSource extends StreamAudioSource {
   final Uint8List _bytes;
   
