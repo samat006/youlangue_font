@@ -8,7 +8,7 @@ import '../../data/services/upload_service.dart';
 import '../../data/models/video_model.dart';
 import '../widgets/video_card.dart';
 import 'player_screen.dart';
-
+import 'about_screen.dart'; // ✅ NOUVEL IMPORT
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
 
@@ -72,6 +72,19 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ],
         ),
+      // ✅ AJOUT DE L'ACTION BOUTON (À PROPOS)
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.info_outline, color: Colors.white),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AboutScreen()),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: Column(
         children: [
