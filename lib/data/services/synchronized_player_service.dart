@@ -3,9 +3,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:flutter/material.dart'; // Nécessaire pour Icons.skip_next si utilisé ici, sinon peut être retiré
+import 'package:flutter/foundation.dart'; // Pour ChangeNotifier
 import 'package:just_audio/just_audio.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
+import 'package:video_player/video_player.dart'; // Pour les fichiers uploadés/natifs
+
 import '../models/translation_model.dart';
 
 class IndexedAudioChunk {
@@ -22,8 +24,10 @@ class IndexedAudioChunk {
   });
 }
 
-class SynchronizedPlayerService {
-  late YoutubePlayerController videoController;
+class SynchronizedPlayerService extends ChangeNotifier {
+  // Contrôleurs
+  YoutubePlayerController? _ytController; // Ancien 'videoController', maintenant interne et nullable
+  VideoPlayerController? nativeVideoController; // Contrôleur pour les fichiers natifs/uploadés
   
   final AudioPlayer _translatedAudioPlayer = AudioPlayer();
   final AudioPlayer _originalAudioPlayer = AudioPlayer();
@@ -31,26 +35,42 @@ class SynchronizedPlayerService {
   final List<IndexedAudioChunk> _audioIndex = [];
   ConcatenatingAudioSource? _playlist;
   final List<double> _chunkStartPositions = [];
-  
-  double _translatedVolume = 1.0;
-  double _originalVolume = 0.5;
-  
+
+  // Indicateurs d'état
+  bool _isNativeVideoMode = false; // Vrai si c'est un fichier uploadé
   bool _isDisposed = false;
   bool _translationComplete = false;
   bool _originalAudioLoaded = false;
-  
   bool _hasFirstChunk = false;
   bool _hasStarted = false;
   int _currentChunkIndex = 0;
   int _totalChunks = 0;
   double _chunkDuration = 10.0;
   
+  double _translatedVolume = 1.0;
+  double _originalVolume = 0.5;
+  
   Timer? _syncTimer;
   bool _lastVideoPlayingState = false;
   
   // Getters
-  bool get isPlaying => videoController.value.isPlaying;
-  Duration get position => videoController.value.position;
+  
+  // Expose le contrôleur YT si nécessaire (pour PlayerScreen qui utilise YoutubePlayer)
+  YoutubePlayerController get videoController => _ytController!; 
+  
+  // Expose le contrôleur natif (pour PlayerScreen qui utilise VideoPlayer)
+  VideoPlayerController get localVideoController => nativeVideoController!;
+  bool get isLocalVideoLoaded => nativeVideoController?.value.isInitialized ?? false;
+
+  bool get isPlaying => _isNativeVideoMode 
+    ? (nativeVideoController?.value.isPlaying ?? false)
+    : (_ytController?.value.isPlaying ?? false);
+    
+  Duration get position => _isNativeVideoMode 
+    ? (nativeVideoController?.value.position ?? Duration.zero)
+    : (_ytController?.value.position ?? Duration.zero);
+    
+  bool get isNativeVideoMode => _isNativeVideoMode;
   bool get canSeek => _translationComplete;
   bool get hasFirstChunk => _hasFirstChunk;
   int get currentChunkIndex => _currentChunkIndex;
@@ -58,16 +78,16 @@ class SynchronizedPlayerService {
   int get availableChunks => _audioIndex.length;
   double get translatedVolume => _translatedVolume;
   double get originalVolume => _originalVolume;
-  
   bool get canNavigateNext => _hasStarted && _currentChunkIndex < _audioIndex.length - 1;
   bool get canNavigatePrevious => _hasStarted && _currentChunkIndex > 0;
   
   void initializeVideo(String videoId) {
-    videoController = YoutubePlayerController(
+    _isNativeVideoMode = false; // Mode YouTube
+    _ytController = YoutubePlayerController(
       initialVideoId: videoId,
       flags: const YoutubePlayerFlags(
         autoPlay: false,
-        mute: true, // Important: on coupe le son de la vidéo YouTube elle-même
+        mute: true,
         enableCaption: false,
         controlsVisibleAtStart: false,
         hideControls: true,
@@ -80,10 +100,36 @@ class SynchronizedPlayerService {
     _translatedAudioPlayer.setVolume(_translatedVolume);
     _originalAudioPlayer.setVolume(_originalVolume);
     
-    // Timer léger pour la synchro Play/Pause
     _startPlayPauseSync();
   }
   
+  // ✅ NOUVELLE MÉTHODE : Initialisation vidéo native
+  Future<void> initializeNativeVideo(String videoUrl) async {
+    _isNativeVideoMode = true;
+    
+    print('🎬 Initialisation vidéo native: $videoUrl');
+    
+    nativeVideoController = VideoPlayerController.networkUrl(
+      Uri.parse(videoUrl),
+    );
+    
+    try {
+      await nativeVideoController!.initialize();
+      await nativeVideoController!.setVolume(0.0);
+      notifyListeners(); // Informe PlayerScreen que la vidéo est chargée
+      print('✅ Vidéo native initialisée');
+    } catch (e) {
+      print('❌ Erreur chargement vidéo native: $e');
+      // Si la vidéo ne charge pas, elle reste en mode "audio seulement" (isLocalVideoLoaded = false)
+      nativeVideoController = null;
+    }
+    
+    _translatedAudioPlayer.setVolume(_translatedVolume);
+    _originalAudioPlayer.setVolume(_originalVolume);
+    
+    _startPlayPauseSync();
+  }
+
   void _startPlayPauseSync() {
     _syncTimer = Timer.periodic(const Duration(milliseconds: 200), (timer) {
       if (_isDisposed) {
@@ -93,14 +139,13 @@ class SynchronizedPlayerService {
       
       if (!_hasStarted) return;
       
-      // Détecter changement état vidéo
-      final videoPlaying = videoController.value.isPlaying;
+      // Utilisation du getter isPlaying unifié
+      final videoPlaying = isPlaying; 
       
       if (videoPlaying != _lastVideoPlayingState) {
         _lastVideoPlayingState = videoPlaying;
         
         if (videoPlaying) {
-          // Vidéo a démarré -> Démarrer audios
           if (!_translatedAudioPlayer.playing) {
             _translatedAudioPlayer.play();
             print('🔄 Audio traduit -> Play');
@@ -110,7 +155,6 @@ class SynchronizedPlayerService {
             print('🔄 Audio original -> Play');
           }
         } else {
-          // Vidéo en pause -> Pauser audios
           if (_translatedAudioPlayer.playing) {
             _translatedAudioPlayer.pause();
             print('🔄 Audio traduit -> Pause');
@@ -187,8 +231,6 @@ class SynchronizedPlayerService {
         }
         
         _chunkStartPositions.add(cumulativePosition);
-        // print('📍 Position cumulée chunk ${_audioIndex.length}: ${cumulativePosition.toStringAsFixed(1)}s');
-        
         await _playlist!.add(_BytesAudioSource(bytes));
       }
       
@@ -229,7 +271,12 @@ class SynchronizedPlayerService {
       if (_originalAudioLoaded) {
         await _originalAudioPlayer.seek(Duration.zero);
       }
-      videoController.seekTo(Duration.zero);
+      
+      if (_isNativeVideoMode) {
+        await nativeVideoController?.seekTo(Duration.zero);
+      } else {
+        _ytController?.seekTo(Duration.zero);
+      }
       
       await Future.delayed(const Duration(milliseconds: 500));
       
@@ -249,7 +296,11 @@ class SynchronizedPlayerService {
       
       // 3. DÉMARRER VIDÉO
       print('3️⃣ Démarrage vidéo...');
-      videoController.play();
+      if (_isNativeVideoMode) {
+        await nativeVideoController?.play();
+      } else {
+        _ytController?.play();
+      }
       print('   ✅ Vidéo démarrée');
       
       _lastVideoPlayingState = true;
@@ -269,21 +320,24 @@ class SynchronizedPlayerService {
   Future<void> playPause() async {
     if (!_hasStarted) return;
     
-    if (videoController.value.isPlaying) {
+    if (isPlaying) {
       await pause();
     } else {
       await play();
     }
   }
   
-  // === CORRECTION ICI : Les méthodes play et pause sont nettoyées ===
   Future<void> play() async {
     if (!_hasStarted) return;
     
     print('\n▶️ ===== PLAY =====');
     
     // Vidéo
-    videoController.play();
+    if (_isNativeVideoMode) {
+      await nativeVideoController?.play();
+    } else {
+      _ytController?.play();
+    }
     print('▶️ Vidéo');
     
     // Audios
@@ -306,7 +360,11 @@ class SynchronizedPlayerService {
     print('\n⏸️ ===== PAUSE =====');
     
     // Vidéo d'abord
-    videoController.pause();
+    if (_isNativeVideoMode) {
+      await nativeVideoController?.pause();
+    } else {
+      _ytController?.pause();
+    }
     print('⏸️ Vidéo');
     _lastVideoPlayingState = false;
     
@@ -323,7 +381,6 @@ class SynchronizedPlayerService {
     
     print('===== PAUSE OK =====\n');
   }
-  // === FIN CORRECTION ===
   
   Future<void> nextChunk() async {
     if (_currentChunkIndex >= _audioIndex.length - 1) {
@@ -351,11 +408,15 @@ class SynchronizedPlayerService {
     final chunk = _audioIndex[chunkIndex];
     print('\n🎯 ===== SEEK CHUNK ${chunkIndex + 1}/${_audioIndex.length} =====');
     
-    final wasPlaying = videoController.value.isPlaying;
+    final wasPlaying = isPlaying;
     
     // 1. PAUSE
     if (wasPlaying) {
-      videoController.pause();
+      if (_isNativeVideoMode) {
+        await nativeVideoController?.pause();
+      } else {
+        _ytController?.pause();
+      }
       await _translatedAudioPlayer.pause();
       if (_originalAudioLoaded) await _originalAudioPlayer.pause();
       print('⏸️ Tout en pause');
@@ -363,7 +424,13 @@ class SynchronizedPlayerService {
     }
     
     // 2. SEEK
-    videoController.seekTo(Duration(milliseconds: (chunk.timestampStart * 1000).toInt()));
+    final duration = Duration(milliseconds: (chunk.timestampStart * 1000).toInt());
+
+    if (_isNativeVideoMode) {
+      await nativeVideoController?.seekTo(duration);
+    } else {
+      _ytController?.seekTo(duration);
+    }
     print('📹 Vidéo -> ${chunk.timestampStart.toStringAsFixed(1)}s');
     
     if (chunkIndex < _chunkStartPositions.length) {
@@ -386,7 +453,11 @@ class SynchronizedPlayerService {
       await _translatedAudioPlayer.play();
       if (_originalAudioLoaded) await _originalAudioPlayer.play();
       await Future.delayed(const Duration(milliseconds: 100));
-      videoController.play();
+      if (_isNativeVideoMode) {
+        await nativeVideoController?.play();
+      } else {
+        _ytController?.play();
+      }
       _lastVideoPlayingState = true;
       print('▶️ Reprise');
     }
@@ -409,13 +480,22 @@ class SynchronizedPlayerService {
     await _seekToChunk(0);
   }
   
+  @override
   void dispose() {
-    print('🗑️ Dispose');
+    print('🗑️ Dispose PlayerService');
     _isDisposed = true;
     _syncTimer?.cancel();
-    videoController.dispose();
+    
+    // Dispose conditionnel
+    if (_isNativeVideoMode) {
+      nativeVideoController?.dispose();
+    } else {
+      _ytController?.dispose();
+    }
+    
     _translatedAudioPlayer.dispose();
     _originalAudioPlayer.dispose();
+    super.dispose();
   }
 }
 

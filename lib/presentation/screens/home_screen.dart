@@ -1,10 +1,12 @@
 // lib/presentation/screens/home_screen.dart
+
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 import '../../data/services/youtube_service.dart';
+import '../../data/services/upload_service.dart';
 import '../../data/models/video_model.dart';
 import '../widgets/video_card.dart';
-import '../widgets/language_selector.dart';
-import '../widgets/voice_selector.dart';
 import 'player_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -16,14 +18,15 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final YouTubeService _youtubeService = YouTubeService();
+  final UploadService _uploadService = UploadService();
   final TextEditingController _searchController = TextEditingController();
   
   List<VideoModel> _videos = [];
   bool _isLoading = false;
-  String _selectedLang = 'fr'; // Français par défaut
+  bool _isUploading = false;
+  String _selectedLang = 'fr';
   String _selectedVoice = 'auto';
 
-  // Couleurs YouTube
   final Color ytBlack = const Color(0xFF0F0F0F);
   final Color ytRed = const Color(0xFFFF0000);
   final Color ytSurface = const Color(0xFF272727);
@@ -57,21 +60,22 @@ class _HomeScreenState extends State<HomeScreen> {
         elevation: 0,
         title: Row(
           children: [
-            Image.network(
-              'https://upload.wikimedia.org/wikipedia/commons/e/ef/Youtube_logo.png', // Ou ton logo Kaddu
-              height: 25,
-            ),
+            Icon(Icons.translate, color: ytRed, size: 28),
             const SizedBox(width: 10),
             const Text(
               'Kaddu AI', 
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: -1),
+              style: TextStyle(
+                color: Colors.white, 
+                fontWeight: FontWeight.bold, 
+                letterSpacing: -1
+              ),
             ),
           ],
         ),
       ),
       body: Column(
         children: [
-          // Barre de recherche YouTube Style
+          // Barre de recherche YouTube
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Container(
@@ -98,7 +102,60 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // Sélecteurs rapides (Chips style)
+          // ✅ BOUTON UPLOAD
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: InkWell(
+              onTap: _isUploading ? null : _pickAndUploadFile,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: _isUploading 
+                      ? [Colors.grey[800]!, Colors.grey[700]!]
+                      : [ytRed, const Color(0xFFCC0000)],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: ytRed.withOpacity(0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (_isUploading)
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    else
+                      const Icon(Icons.upload_file, color: Colors.white),
+                    const SizedBox(width: 10),
+                    Text(
+                      _isUploading 
+                        ? 'Upload en cours...' 
+                        : '📤 Uploader Vidéo/Audio (MP4, MP3)',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Sélecteurs langue/voix
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
@@ -107,7 +164,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: _buildActionButton(
                     label: _languages.firstWhere((l) => l['code'] == _selectedLang)['name']!,
                     icon: Icons.language,
-                    onTap: () => _showLanguagePicker(),
+                    onTap: _showLanguagePicker,
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -115,7 +172,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: _buildActionButton(
                     label: _voices.firstWhere((v) => v['code'] == _selectedVoice)['name']!,
                     icon: Icons.record_voice_over,
-                    onTap: () => _showVoicePicker(),
+                    onTap: _showVoicePicker,
                   ),
                 ),
               ],
@@ -144,7 +201,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildActionButton({required String label, required IconData icon, required VoidCallback onTap}) {
+  Widget _buildActionButton({
+    required String label, 
+    required IconData icon, 
+    required VoidCallback onTap
+  }) {
     return InkWell(
       onTap: onTap,
       child: Container(
@@ -159,7 +220,17 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Icon(icon, color: ytRed, size: 18),
             const SizedBox(width: 8),
-            Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500)),
+            Flexible(
+              child: Text(
+                label, 
+                style: const TextStyle(
+                  color: Colors.white, 
+                  fontSize: 13, 
+                  fontWeight: FontWeight.w500
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
       ),
@@ -174,20 +245,108 @@ class _HomeScreenState extends State<HomeScreen> {
           Icon(Icons.slow_motion_video, size: 80, color: ytSurface),
           const SizedBox(height: 16),
           Text(
-            'Entrez un sujet ou un lien vidéo',
-            style: TextStyle(color: const Color.fromARGB(255, 96, 29, 29)),
+            '🔍 Recherchez une vidéo',
+            style: TextStyle(color: Colors.grey[600], fontSize: 16),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'ou',
+            style: TextStyle(color: Colors.grey[700], fontSize: 14),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '📤 Uploadez votre fichier',
+            style: TextStyle(color: Colors.grey[600], fontSize: 16),
           ),
         ],
       ),
     );
   }
 
-  // --- Méthodes de sélection ---
+  // ✅ MÉTHODE UPLOAD
+  Future<void> _pickAndUploadFile() async {
+    try {
+      // 1. Sélectionner fichier
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['mp4', 'mp3', 'mov', 'avi', 'mkv', 'wav', 'm4a'],
+      );
+      
+      if (result == null) {
+        print('❌ Aucun fichier sélectionné');
+        return;
+      }
+      
+      final file = File(result.files.single.path!);
+      final fileName = result.files.single.name;
+      final fileSize = result.files.single.size;
+      
+      print('📁 Fichier: $fileName (${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB)');
+      
+      // Vérifier taille (max 500MB)
+      if (fileSize > 500 * 1024 * 1024) {
+        _showError('Fichier trop volumineux (max 500 MB)');
+        return;
+      }
+      
+      setState(() => _isUploading = true);
+      
+      // 2. Upload
+      final uploadResult = await _uploadService.uploadFile(file);
+      
+      setState(() => _isUploading = false);
+      
+      if (uploadResult['success'] == true) {
+        // 3. Aller au PlayerScreen
+        _playUploadedFile(fileName);
+      } else {
+        _showError(uploadResult['error'] ?? 'Erreur upload');
+      }
+      
+    } catch (e) {
+      setState(() => _isUploading = false);
+      _showError('Erreur: $e');
+    }
+  }
+
+  void _playUploadedFile(String filename) {
+    final video = VideoModel(
+      id: 'uploaded_${DateTime.now().millisecondsSinceEpoch}',
+      title: filename,
+      thumbnail: '',
+      url: 'uploaded://$filename',
+      duration: '',
+      channelTitle: 'Local File',  // ✅ AJOUTER CETTE LIGNE
+
+    );
+    
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PlayerScreen(
+          video: video,
+          targetLang: _selectedLang,
+          voiceType: _selectedVoice,
+        ),
+      ),
+    );
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red[700],
+      ),
+    );
+  }
 
   void _showLanguagePicker() {
     showModalBottomSheet(
       backgroundColor: ytSurface,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20))
+      ),
       context: context,
       builder: (context) => Container(
         padding: const EdgeInsets.all(20),
@@ -223,10 +382,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ... (Garder _searchVideos et _playVideo tels quels)
   Future<void> _searchVideos() async {
     if (_searchController.text.trim().isEmpty) return;
+    
     setState(() => _isLoading = true);
+    
     try {
       final videos = await _youtubeService.searchVideos(_searchController.text.trim());
       setState(() {
@@ -235,7 +395,7 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     } catch (e) {
       setState(() => _isLoading = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
+      _showError('Erreur recherche: $e');
     }
   }
 

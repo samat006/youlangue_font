@@ -10,6 +10,8 @@ import '../../data/models/translation_model.dart';
 import '../../data/services/websocket_service.dart';
 import '../../data/services/synchronized_player_service.dart';
 import '../widgets/transcript_view.dart';
+import 'package:video_player/video_player.dart';  // ✅ AJOUTER
+
 
 class PlayerScreen extends StatefulWidget {
   final VideoModel video;
@@ -56,17 +58,110 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _startUIUpdates();
   }
 
-  void _initializeSyncPlayer() {
-    final videoId = YoutubePlayer.convertUrlToId(widget.video.url);
-    _syncPlayer = SynchronizedPlayerService();
-    _syncPlayer.initializeVideo(videoId!);
-    
-    Future.delayed(Duration(seconds: 1), () {
-      _syncPlayer.setTranslatedVolume(_volTranslated);
-      _syncPlayer.setOriginalVolume(_volOriginal);
-    });
-  }
+// lib/presentation/screens/player_screen.dart
 
+
+
+
+void _initializeSyncPlayer() async {  // ✅ async
+  final isUploadedFile = widget.video.url.startsWith('uploaded://');
+  
+  if (isUploadedFile) {
+    print('📁 Fichier uploadé avec vidéo');
+    
+    // Extraire le filename
+    final filename = widget.video.url.replaceFirst('uploaded://', '');
+    
+    // URL backend pour la vidéo
+    final videoUrl = 'http://localhost:8000/uploads/$filename';
+    
+    print('🎬 URL vidéo: $videoUrl');
+    
+    _syncPlayer = SynchronizedPlayerService();
+    await _syncPlayer.initializeNativeVideo(videoUrl);  // ✅ VIDÉO NATIVE
+    
+  } else {
+    final videoId = YoutubePlayer.convertUrlToId(widget.video.url);
+    
+    if (videoId == null) {
+      print('❌ URL invalide');
+      return;
+    }
+    
+    print('🎬 Vidéo YouTube');
+    _syncPlayer = SynchronizedPlayerService();
+    _syncPlayer.initializeVideo(videoId);
+  }
+  
+  Future.delayed(Duration(seconds: 1), () {
+    _syncPlayer.setTranslatedVolume(_volTranslated);
+    _syncPlayer.setOriginalVolume(_volOriginal);
+  });
+}
+
+Widget _buildImmersiveVideo() {
+  // ✅ VIDÉO NATIVE (fichier uploadé)
+  if (_syncPlayer.isNativeVideoMode && _syncPlayer.nativeVideoController != null) {
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.40,
+      decoration: BoxDecoration(
+        color: Colors.black,
+        boxShadow: [
+          BoxShadow(color: ytRed.withOpacity(0.1), blurRadius: 30, spreadRadius: 5),
+        ],
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Center(
+            child: AspectRatio(
+              aspectRatio: _syncPlayer.nativeVideoController!.value.aspectRatio,
+              child: VideoPlayer(_syncPlayer.nativeVideoController!),
+            ),
+          ),
+          // Bloquer interactions
+          Positioned.fill(
+            child: Container(
+              color: Colors.transparent,
+              child: AbsorbPointer(
+                absorbing: true,
+                child: Container(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  // ✅ VIDÉO YOUTUBE
+  return Container(
+    height: MediaQuery.of(context).size.height * 0.40,
+    decoration: BoxDecoration(
+      boxShadow: [
+        BoxShadow(color: ytRed.withOpacity(0.1), blurRadius: 30, spreadRadius: 5),
+      ],
+    ),
+    child: Stack(
+      alignment: Alignment.center,
+      children: [
+        YoutubePlayer(
+          controller: _syncPlayer.videoController,
+          showVideoProgressIndicator: false,
+        ),
+        Positioned.fill(
+          child: Container(
+            color: Colors.transparent,
+            child: AbsorbPointer(
+              absorbing: true,
+              child: Container(),
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
   void _startUIUpdates() {
     _uiTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
       if (!mounted) return;
@@ -399,35 +494,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
- Widget _buildImmersiveVideo() {
-  return Container(
-    height: MediaQuery.of(context).size.height * 0.40,
-    decoration: BoxDecoration(
-      boxShadow: [
-        BoxShadow(color: ytRed.withOpacity(0.1), blurRadius: 30, spreadRadius: 5),
-      ],
-    ),
-    child: Stack(
-      alignment: Alignment.center,
-      children: [
-        YoutubePlayer(
-          controller: _syncPlayer.videoController,
-          showVideoProgressIndicator: false,
-        ),
-        // ✅ BLOQUER TOUTE INTERACTION
-        Positioned.fill(
-          child: Container(
-            color: Colors.transparent,
-            child: AbsorbPointer(
-              absorbing: true,  // ✅ BLOQUER TOUS LES GESTES
-              child: Container(),
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
 
   Widget _buildCyberHeader() {
     return ClipRRect(

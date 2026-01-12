@@ -40,6 +40,10 @@ dependencies:
   # WebView
   webview_flutter: ^4.4.4
 
+  file_picker: ^8.0.0
+  path: ^1.9.0
+  video_player: ^2.8.0  # ✅ NOUVEAU
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
