@@ -25,7 +25,7 @@ class AudioChunk {
       sequence: json['sequence'] ?? 0,
       data: json['data'] ?? '',
       transcript: json['transcript'] ?? '',
-      translation: json['translation'] ?? '',
+      translation: json['translated'] ?? '',
       progress: json['progress'] ?? 0,
       timestampStart: (json['timestamp_start'] ?? 0.0).toDouble(),
       timestampEnd: (json['timestamp_end'] ?? 0.0).toDouble(),

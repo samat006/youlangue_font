@@ -20,7 +20,7 @@ class _HomeScreenState extends State<HomeScreen> {
   
   List<VideoModel> _videos = [];
   bool _isLoading = false;
-  String _selectedLang = 'wo'; // Wolof par défaut
+  String _selectedLang = 'fr'; // Français par défaut
   String _selectedVoice = 'auto';
 
   // Couleurs YouTube
@@ -175,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(height: 16),
           Text(
             'Entrez un sujet ou un lien vidéo',
-            style: TextStyle(color: Colors.grey[600]),
+            style: TextStyle(color: const Color.fromARGB(255, 96, 29, 29)),
           ),
         ],
       ),

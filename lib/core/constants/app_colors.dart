@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 
 class AppColors {
   // Couleurs principales
-  static const Color primary = Color(0xFF667EEA);
-  static const Color secondary = Color(0xFF767BA2);
+  static const Color primary = Color.fromARGB(255, 23, 8, 8);
+  static const Color secondary = Color.fromARGB(255, 13, 12, 12);
   
   // Arrière-plans
   static const Color background = Color(0xFFF5F5F5);
@@ -19,11 +19,11 @@ class AppColors {
   static const Color success = Color(0xFF4CAF50);
   static const Color error = Color(0xFFFF5252);
   static const Color warning = Color(0xFFFFC107);
-  static const Color info = Color(0xFF2196F3);
+  static const Color info = Color.fromARGB(255, 25, 11, 11);
   
   // Gradients
   static const LinearGradient primaryGradient = LinearGradient(
-    colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
+    colors: [Color.fromARGB(255, 7, 6, 6), Color.fromARGB(255, 30, 9, 10)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );

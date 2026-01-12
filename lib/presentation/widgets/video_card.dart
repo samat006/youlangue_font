@@ -70,7 +70,7 @@ class VideoCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
-                        color: Color(0xFF888888),
+                        color: Color.fromARGB(255, 0xFFFF000070, 31, 31),
                       ),
                     ),
                     SizedBox(height: 8),
@@ -83,7 +83,7 @@ class VideoCard extends StatelessWidget {
                       ),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [Color(0xFF667EEA), Color(0xFF764BA2)],
+                          colors: [Color.fromARGB(255, 83, 1, 1), Color.fromARGB(255, 191, 83, 62)],
                         ),
                         borderRadius: BorderRadius.circular(20),
                       ),

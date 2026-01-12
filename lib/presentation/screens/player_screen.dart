@@ -103,7 +103,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
         case 'status':
           setState(() => _status = data['message']);
           break;
-          
+         
+        case 'voice_detected':  // ✅ NOUVEAU
+        final voiceType = data['voice_type'];
+        print('🎤 Type de voix détecté: $voiceType');
+        
+        String emoji = '👤';
+        if (voiceType == 'male') emoji = '👨';
+        if (voiceType == 'female') emoji = '👩';
+        if (voiceType == 'child') emoji = '👶';
+        
+        setState(() => _status = '$emoji Voix: $voiceType');
+        break;
+    
         case 'translation_ready':
           _syncPlayer.setTotalChunks(
             data['total_chunks'], 
@@ -283,7 +295,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      _navButton(Icons.skip_previous, _syncPlayer.canNavigatePrevious, () => _syncPlayer.previousChunk()),
+                    //  _navButton(Icons.skip_previous, _syncPlayer.canNavigatePrevious, () => _syncPlayer.previousChunk()),
                       
                       GestureDetector(
                         onTap: () => _syncPlayer.playPause(),
@@ -303,7 +315,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ),
                       ),
 
-                      _navButton(Icons.skip_next, _syncPlayer.canNavigateNext, () => _syncPlayer.nextChunk()),
+                   //   _navButton(Icons.skip_next, _syncPlayer.canNavigateNext, () => _syncPlayer.nextChunk()),
                     ],
                   ),
                   

@@ -33,7 +33,7 @@ class VoiceSelector extends StatelessWidget {
         child: DropdownButton<String>(
           value: selectedVoice,
           isExpanded: true,
-          icon: Icon(Icons.arrow_drop_down, color: Color(0xFF667EEA)),
+          icon: Icon(Icons.arrow_drop_down, color: Color.fromARGB(255, 54, 2, 1)),
           style: TextStyle(
             color: Color(0xFF333333),
             fontSize: 14,

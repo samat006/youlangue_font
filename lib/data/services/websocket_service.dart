@@ -22,26 +22,28 @@ class WebSocketService {
     }
   }
   
-  void startTranslation({
-    required String videoUrl,
-    required String targetLang,
-    String voicePreference = 'auto',
-  }) {
-    if (_channel == null) {
-      throw Exception('WebSocket non connecté');
-    }
-    
-    final message = json.encode({
-      'action': 'start_translation',
-      'video_url': videoUrl,
-      'target_lang': targetLang,
-      'voice_preference': voicePreference,
-    });
-    
-    _channel!.sink.add(message);
-    print('📤 Requête traduction envoyée');
+void startTranslation({
+  required String videoUrl,
+  required String targetLang,
+  required String voicePreference,
+  bool useSeparation = false,  // ✅ NOUVEAU
+}) {
+  if (_channel == null) {
+    print('❌ WebSocket non connecté');
+    return;
   }
   
+  final message = {
+    'action': 'start_translation',
+    'video_url': videoUrl,
+    'target_lang': targetLang,
+    'voice_preference': voicePreference,
+    'use_separation': useSeparation,  // ✅ ENVOYER
+  };
+  
+  print('📤 Envoi requête (séparation: $useSeparation)');
+  _channel!.sink.add(json.encode(message));
+}
   void disconnect() {
     _channel?.sink.close();
     _channel = null;
