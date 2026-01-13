@@ -3,15 +3,15 @@
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
-import '../../config/api_config.dart';
-
+import '../../core/constants/api_constants.dart';
 class UploadService {
-  Future<Map<String, dynamic>> uploadFile(File file) async {
+  static const String baseUrl = ApiConstants.baseUrl;
   
+  Future<Map<String, dynamic>> uploadFile(File file) async {
     try {
       print('📤 Upload: ${file.path}');
       
-      final uri = Uri.parse('${ApiConfig.baseUrl}/upload');
+      final uri = Uri.parse('$baseUrl/upload');
       final request = http.MultipartRequest('POST', uri);
       
       final fileStream = http.ByteStream(file.openRead());
