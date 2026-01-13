@@ -12,27 +12,27 @@ class AdManager {
   // ✅ IDS DE TEST (remplacer en production)
   static String get bannerAdUnitId {
     if (Platform.isAndroid) {
-      return 'ca-app-pub-3940256099942544/6300978111'; // Test
+      return 'ca-app-pub-4910351400774530/8992792297'; // Test
     } else if (Platform.isIOS) {
-      return 'ca-app-pub-3940256099942544/2934735716'; // Test
+      return 'ca-app-pub-4910351400774530/7347526370'; // Test
     }
     return '';
   }
 
   static String get interstitialAdUnitId {
     if (Platform.isAndroid) {
-      return 'ca-app-pub-3940256099942544/1033173712'; // Test
+      return 'ca-app-pub-4910351400774530/2889406614'; // Test
     } else if (Platform.isIOS) {
-      return 'ca-app-pub-3940256099942544/4411468910'; // Test
+      return 'ca-app-pub-4910351400774530/1930698104'; // Test
     }
     return '';
   }
 
   static String get rewardedAdUnitId {
     if (Platform.isAndroid) {
-      return 'ca-app-pub-3940256099942544/5224354917'; // Test
+      return 'ca-app-pub-4910351400774530/3740465612'; // Test
     } else if (Platform.isIOS) {
-      return 'ca-app-pub-3940256099942544/1712485313'; // Test
+      return 'ca-app-pub-4910351400774530/4529791343'; // Test
     }
     return '';
   }
