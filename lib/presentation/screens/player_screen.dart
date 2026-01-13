@@ -11,7 +11,6 @@ import '../../data/services/websocket_service.dart';
 import '../../data/services/synchronized_player_service.dart';
 import '../widgets/transcript_view.dart';
 import 'package:video_player/video_player.dart';  // ✅ AJOUTER
-import '../../config/api_config.dart';
 
 
 class PlayerScreen extends StatefulWidget {
@@ -74,7 +73,7 @@ void _initializeSyncPlayer() async {  // ✅ async
     final filename = widget.video.url.replaceFirst('uploaded://', '');
     
     // URL backend pour la vidéo
-    final videoUrl = '${ApiConfig.baseUrl}/uploads/$filename';
+    final videoUrl = 'http://youlangue-production.up.railway.app/uploads/$filename';
     
     print('🎬 URL vidéo: $videoUrl');
     

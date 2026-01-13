@@ -1,9 +1,10 @@
 // lib/core/constants/api_constants.dart
 import 'package:flutter/material.dart'; 
+
 class ApiConstants {
   // Backend
-  static const String baseUrl = 'http://172.20.10.4:8000';
-  static const String wsUrl = 'ws://172.20.10.4:8000';
+  static const String baseUrl = 'https://youlangue-production.up.railway.app';
+  static const String wsUrl = 'wss://youlangue-production.up.railway.app';
   
   // YouTube Data API v3 (gratuit : 10K requêtes/jour)
   static const String youtubeApiKey = 'AIzaSyBTfCSYdzv0Tgylcve0oYalyLpf0XlvIro';
@@ -16,7 +17,7 @@ class ApiConstants {
 }
 
 class AppStrings {
-  static const String appName = 'Video Translator';
+  static const String appName = 'Video ';
   static const String searchHint = 'Rechercher une vidéo YouTube...';
   static const String selectLanguage = 'Langue cible';
   static const String selectVoice = 'Type de voix';
