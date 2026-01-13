@@ -31,7 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedLang = 'fr';
   String _selectedVoice = 'auto';
   
-  int _freeUploadsRemaining = 0; // ✅ 3 uploads gratuits
+  int _freeUploadsRemaining = 1; // ✅ 3 uploads gratuits
 
   final Color ytBlack = const Color(0xFF0F0F0F);
   final Color ytRed = const Color(0xFFFF0000);
@@ -478,11 +478,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (shouldWatch == true) {
       await _watchRewardedForUpload();
+
+      setState(() {
+        _freeUploadsRemaining += 1;
+      });
     }
   }
 
   // ✅ AFFICHER REWARDED
   Future<void> _watchRewardedForUpload() async {
+    
     if (!_adManager.isRewardedReady) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('⏳ Chargement pub...')),
@@ -504,7 +509,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (rewarded) {
       setState(() {
-        _freeUploadsRemaining += 1;
+        _freeUploadsRemaining += 3;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -514,7 +519,7 @@ class _HomeScreenState extends State<HomeScreen> {
           duration: const Duration(seconds: 3),
         ),
       );
-
+    
       await _performUpload();
     }
   }

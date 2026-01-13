@@ -543,17 +543,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Widget _buildCyberHeader() {
-    return ClipRRect(
+ Widget _buildCyberHeader() {
+  return AnimatedOpacity(
+    opacity: _isControlsExpanded ? 1.0 : 0.0, // ✅ Cache avec les contrôles
+    duration: const Duration(milliseconds: 300),
+    child: ClipRRect(
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
         child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 50, 16, 16),
-          color: Colors.black.withOpacity(0.4),
+          padding: const EdgeInsets.fromLTRB(16, 50, 16, 12), // ✅ Padding réduit
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withOpacity(0.7),
+                Colors.black.withOpacity(0.0),
+              ],
+            ),
+          ),
           child: Row(
             children: [
               IconButton(
-                icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
+                icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
                 onPressed: () => Navigator.pop(context),
               ),
               Expanded(
@@ -561,20 +573,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   widget.video.title.toUpperCase(),
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.5,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+             
+
             ],
           ),
         ),
       ),
-    );
-  }
-
+    ),
+  );
+}
   Widget _buildLoadingOverlay() {
     return BackdropFilter(
       filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
