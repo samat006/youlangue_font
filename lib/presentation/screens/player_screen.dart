@@ -10,8 +10,8 @@ import '../../data/models/translation_model.dart';
 import '../../data/services/websocket_service.dart';
 import '../../data/services/synchronized_player_service.dart';
 import '../widgets/transcript_view.dart';
-import 'package:video_player/video_player.dart';  // ✅ AJOUTER
-
+import 'package:video_player/video_player.dart';
+import '../../data/services/ad_manager.dart'; // ✅ CORRECTION du chemin
 
 class PlayerScreen extends StatefulWidget {
   final VideoModel video;
@@ -32,6 +32,7 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   final WebSocketService _wsService = WebSocketService();
   late SynchronizedPlayerService _syncPlayer;
+  final AdManager _adManager = AdManager(); // ✅ AJOUTER CETTE LIGNE
 
   String _status = 'Connexion NeuralNet...';
   double _progress = 0.0;
@@ -39,6 +40,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isTranslating = true;
   bool _waitingForFirstChunk = true;
   bool _isPlaying = false;
+  bool _isTranslationComplete = false; // ✅ AJOUTER
   
   bool _isControlsExpanded = true;
 
@@ -56,56 +58,78 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _initializeSyncPlayer();
     _connectAndStartTranslation();
     _startUIUpdates();
+    
+    // ✅ PRÉCHARGER LES ADS
+    _adManager.loadInterstitialAd();
+    _adManager.loadRewardedAd();
   }
 
-// lib/presentation/screens/player_screen.dart
-
-
-
-
-void _initializeSyncPlayer() async {  // ✅ async
-  final isUploadedFile = widget.video.url.startsWith('uploaded://');
-  
-  if (isUploadedFile) {
-    print('📁 Fichier uploadé avec vidéo');
+  void _initializeSyncPlayer() async {
+    final isUploadedFile = widget.video.url.startsWith('uploaded://');
     
-    // Extraire le filename
-    final filename = widget.video.url.replaceFirst('uploaded://', '');
-    
-    // URL backend pour la vidéo
-    final videoUrl = 'http://youlangue-production.up.railway.app/uploads/$filename';
-    
-    print('🎬 URL vidéo: $videoUrl');
-    
-    _syncPlayer = SynchronizedPlayerService();
-    await _syncPlayer.initializeNativeVideo(videoUrl);  // ✅ VIDÉO NATIVE
-    
-  } else {
-    final videoId = YoutubePlayer.convertUrlToId(widget.video.url);
-    
-    if (videoId == null) {
-      print('❌ URL invalide');
-      return;
+    if (isUploadedFile) {
+      print('📁 Fichier uploadé avec vidéo');
+      
+      final filename = widget.video.url.replaceFirst('uploaded://', '');
+      final videoUrl = 'http://youlangue-production.up.railway.app/uploads/$filename';
+      
+      print('🎬 URL vidéo: $videoUrl');
+      
+      _syncPlayer = SynchronizedPlayerService();
+      await _syncPlayer.initializeNativeVideo(videoUrl);
+      
+    } else {
+      final videoId = YoutubePlayer.convertUrlToId(widget.video.url);
+      
+      if (videoId == null) {
+        print('❌ URL invalide');
+        return;
+      }
+      
+      print('🎬 Vidéo YouTube');
+      _syncPlayer = SynchronizedPlayerService();
+      _syncPlayer.initializeVideo(videoId);
     }
     
-    print('🎬 Vidéo YouTube');
-    _syncPlayer = SynchronizedPlayerService();
-    _syncPlayer.initializeVideo(videoId);
+    Future.delayed(Duration(seconds: 1), () {
+      _syncPlayer.setTranslatedVolume(_volTranslated);
+      _syncPlayer.setOriginalVolume(_volOriginal);
+    });
   }
-  
-  Future.delayed(Duration(seconds: 1), () {
-    _syncPlayer.setTranslatedVolume(_volTranslated);
-    _syncPlayer.setOriginalVolume(_volOriginal);
-  });
-}
 
-Widget _buildImmersiveVideo() {
-  // ✅ VIDÉO NATIVE (fichier uploadé)
-  if (_syncPlayer.isNativeVideoMode && _syncPlayer.nativeVideoController != null) {
+  Widget _buildImmersiveVideo() {
+    if (_syncPlayer.isNativeVideoMode && _syncPlayer.nativeVideoController != null) {
+      return Container(
+        height: MediaQuery.of(context).size.height * 0.40,
+        decoration: BoxDecoration(
+          color: Colors.black,
+          boxShadow: [
+            BoxShadow(color: ytRed.withOpacity(0.1), blurRadius: 30, spreadRadius: 5),
+          ],
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Center(
+              child: AspectRatio(
+                aspectRatio: _syncPlayer.nativeVideoController!.value.aspectRatio,
+                child: VideoPlayer(_syncPlayer.nativeVideoController!),
+              ),
+            ),
+            Positioned.fill(
+              child: AbsorbPointer(
+                absorbing: true,
+                child: Container(color: Colors.transparent),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+    
     return Container(
       height: MediaQuery.of(context).size.height * 0.40,
       decoration: BoxDecoration(
-        color: Colors.black,
         boxShadow: [
           BoxShadow(color: ytRed.withOpacity(0.1), blurRadius: 30, spreadRadius: 5),
         ],
@@ -113,55 +137,21 @@ Widget _buildImmersiveVideo() {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          Center(
-            child: AspectRatio(
-              aspectRatio: _syncPlayer.nativeVideoController!.value.aspectRatio,
-              child: VideoPlayer(_syncPlayer.nativeVideoController!),
-            ),
+          YoutubePlayer(
+            controller: _syncPlayer.videoController,
+            showVideoProgressIndicator: false,
           ),
-          // Bloquer interactions
           Positioned.fill(
-            child: Container(
-              color: Colors.transparent,
-              child: AbsorbPointer(
-                absorbing: true,
-                child: Container(),
-              ),
+            child: AbsorbPointer(
+              absorbing: true,
+              child: Container(color: Colors.transparent),
             ),
           ),
         ],
       ),
     );
   }
-  
-  // ✅ VIDÉO YOUTUBE
-  return Container(
-    height: MediaQuery.of(context).size.height * 0.40,
-    decoration: BoxDecoration(
-      boxShadow: [
-        BoxShadow(color: ytRed.withOpacity(0.1), blurRadius: 30, spreadRadius: 5),
-      ],
-    ),
-    child: Stack(
-      alignment: Alignment.center,
-      children: [
-        YoutubePlayer(
-          controller: _syncPlayer.videoController,
-          showVideoProgressIndicator: false,
-        ),
-        Positioned.fill(
-          child: Container(
-            color: Colors.transparent,
-            child: AbsorbPointer(
-              absorbing: true,
-              child: Container(),
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
+
   void _startUIUpdates() {
     _uiTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
       if (!mounted) return;
@@ -199,17 +189,17 @@ Widget _buildImmersiveVideo() {
           setState(() => _status = data['message']);
           break;
          
-        case 'voice_detected':  // ✅ NOUVEAU
-        final voiceType = data['voice_type'];
-        print('🎤 Type de voix détecté: $voiceType');
-        
-        String emoji = '👤';
-        if (voiceType == 'male') emoji = '👨';
-        if (voiceType == 'female') emoji = '👩';
-        if (voiceType == 'child') emoji = '👶';
-        
-        setState(() => _status = '$emoji Voix: $voiceType');
-        break;
+        case 'voice_detected':
+          final voiceType = data['voice_type'];
+          print('🎤 Type de voix détecté: $voiceType');
+          
+          String emoji = '👤';
+          if (voiceType == 'male') emoji = '👨';
+          if (voiceType == 'female') emoji = '👩';
+          if (voiceType == 'child') emoji = '👶';
+          
+          setState(() => _status = '$emoji Voix: $voiceType');
+          break;
     
         case 'translation_ready':
           _syncPlayer.setTotalChunks(
@@ -255,6 +245,14 @@ Widget _buildImmersiveVideo() {
           setState(() {
             _status = "SYSTÈME PRÊT";
             _isTranslating = false;
+            _isTranslationComplete = true; // ✅ AJOUTER
+          });
+          
+          // ✅ AFFICHER INTERSTITIAL après 1 seconde
+          Future.delayed(const Duration(seconds: 1), () {
+            if (mounted) {
+              _adManager.showInterstitialAd();
+            }
           });
           break;
           
@@ -312,7 +310,7 @@ Widget _buildImmersiveVideo() {
             curve: Curves.fastOutSlowIn,
             left: 15,
             right: 15,
-            bottom: _isControlsExpanded ? 20 : -260, 
+            bottom: _isControlsExpanded ? 20 : -300, // ✅ Augmenté pour bouton rewarded
             child: _buildCollapsibleDock(),
           ),
           
@@ -390,8 +388,6 @@ Widget _buildImmersiveVideo() {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                    //  _navButton(Icons.skip_previous, _syncPlayer.canNavigatePrevious, () => _syncPlayer.previousChunk()),
-                      
                       GestureDetector(
                         onTap: () => _syncPlayer.playPause(),
                         child: Container(
@@ -409,8 +405,6 @@ Widget _buildImmersiveVideo() {
                           ),
                         ),
                       ),
-
-                   //   _navButton(Icons.skip_next, _syncPlayer.canNavigateNext, () => _syncPlayer.nextChunk()),
                     ],
                   ),
                   
@@ -431,6 +425,7 @@ Widget _buildImmersiveVideo() {
   Widget _buildVolumeMixer() {
     return Column(
       children: [
+        // Volume traduit
         Row(
           children: [
             const Icon(Icons.record_voice_over, color: Colors.white, size: 18),
@@ -451,7 +446,6 @@ Widget _buildImmersiveVideo() {
                 child: Slider(
                   value: _volTranslated,
                   onChanged: (val) {
-                    print('🔊 Slider traduit: ${(val * 100).toInt()}%');
                     setState(() => _volTranslated = val);
                     _syncPlayer.setTranslatedVolume(val);
                   },
@@ -460,7 +454,10 @@ Widget _buildImmersiveVideo() {
             ),
           ],
         ),
+        
         const SizedBox(height: 10),
+        
+        // Volume original
         Row(
           children: [
             Icon(Icons.volume_up, color: ytRed, size: 18),
@@ -481,7 +478,6 @@ Widget _buildImmersiveVideo() {
                 child: Slider(
                   value: _volOriginal,
                   onChanged: (val) {
-                    print('🔊 Slider original: ${(val * 100).toInt()}%');
                     setState(() => _volOriginal = val);
                     _syncPlayer.setOriginalVolume(val);
                   },
@@ -490,10 +486,62 @@ Widget _buildImmersiveVideo() {
             ),
           ],
         ),
+        
+        // ✅ BOUTON REWARDED (apparaît si volumes < 100%)
+        if (_isTranslationComplete && (_volTranslated < 1.0 || _volOriginal < 1.0))
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: ElevatedButton.icon(
+              onPressed: _showRewardedForVolumeBoost,
+              icon: const Icon(Icons.card_giftcard, size: 18),
+              label: const Text('🎁 Volume Max'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }
 
+  // ✅ MÉTHODE REWARDED
+  Future<void> _showRewardedForVolumeBoost() async {
+    if (!_adManager.isRewardedReady) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⏳ Chargement pub...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      await _adManager.loadRewardedAd();
+      return;
+    }
+
+    final rewarded = await _adManager.showRewardedAd();
+
+    if (rewarded) {
+      // ✅ RÉCOMPENSE : Volume max
+      setState(() {
+        _volTranslated = 1.0;
+        _volOriginal = 1.0;
+      });
+      _syncPlayer.setTranslatedVolume(1.0);
+      _syncPlayer.setOriginalVolume(1.0);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🎉 Volume max débloqué !'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
 
   Widget _buildCyberHeader() {
     return ClipRRect(
@@ -524,13 +572,6 @@ Widget _buildImmersiveVideo() {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _navButton(IconData icon, bool enabled, VoidCallback onTap) {
-    return IconButton(
-      icon: Icon(icon, color: enabled ? Colors.white : Colors.white24, size: 32),
-      onPressed: enabled ? onTap : null,
     );
   }
 
