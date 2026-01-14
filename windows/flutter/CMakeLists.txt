@@ -71,7 +71,7 @@ target_include_directories(flutter_wrapper_plugin PUBLIC
 )
 add_dependencies(flutter_wrapper_plugin flutter_assemble)
 
-# Wrapper sources needed for the runner.
+# Wrapper sources needed for the VoxTube.
 add_library(flutter_wrapper_app STATIC
   ${CPP_WRAPPER_SOURCES_CORE}
   ${CPP_WRAPPER_SOURCES_APP}

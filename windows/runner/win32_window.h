@@ -1,5 +1,5 @@
-#ifndef RUNNER_WIN32_WINDOW_H_
-#define RUNNER_WIN32_WINDOW_H_
+#ifndef VoxTube_WIN32_WINDOW_H_
+#define VoxTube_WIN32_WINDOW_H_
 
 #include <windows.h>
 
@@ -99,4 +99,4 @@ class Win32Window {
   HWND child_content_ = nullptr;
 };
 
-#endif  // RUNNER_WIN32_WINDOW_H_
+#endif  // VoxTube_WIN32_WINDOW_H_
