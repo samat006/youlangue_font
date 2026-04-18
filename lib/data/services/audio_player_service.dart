@@ -64,7 +64,7 @@ class AudioPlayerService {
       print('📦 Chunk ajouté (total: ${_chunks.length})');
       
       // Construire la playlist si c'est le premier chunk
-      if (_chunks.length == 1) {
+      if (_chunks.length == 4) {
         await _buildPlaylist();
       } else {
         // Ajouter à la playlist existante
@@ -162,6 +162,7 @@ class _BytesAudioSource extends StreamAudioSource {
       offset: start,
       stream: Stream.value(_bytes.sublist(start, end)),
       contentType: 'audio/mpeg',
+      
     );
   }
 }

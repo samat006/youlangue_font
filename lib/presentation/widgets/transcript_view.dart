@@ -91,7 +91,7 @@ class _TranscriptViewState extends State<TranscriptView> {
                         ),
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
-                            colors: [Color(0xFF668EEA), Color(0xFF734BA2)],
+                            colors: [Color.fromARGB(255, 24, 5, 5), Color.fromARGB(255, 128, 16, 29)],
                           ),
                           borderRadius: BorderRadius.circular(8),
                         ),

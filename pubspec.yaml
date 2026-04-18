@@ -1,6 +1,6 @@
 name: voxtube
 description: Traduction vidéo en temps réel multi-plateforme
-version: 1.0.0+2
+version: 1.0.0+3
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -45,6 +45,7 @@ dependencies:
   file_picker: ^10.3.8
   path: ^1.9.0
   video_player: ^2.8.0  # ✅ NOUVEAU
+  image_picker: ^1.2.1
   
 
 dev_dependencies:

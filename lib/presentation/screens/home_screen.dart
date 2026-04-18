@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../../data/services/youtube_service.dart';
 import '../../data/services/upload_service.dart';
@@ -23,6 +24,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final YouTubeService _youtubeService = YouTubeService();
   final UploadService _uploadService = UploadService();
   final AdManager _adManager = AdManager();
+  final ImagePicker _imagePicker = ImagePicker();
   final TextEditingController _searchController = TextEditingController();
   
   List<VideoModel> _videos = [];
@@ -31,13 +33,13 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedLang = 'fr';
   String _selectedVoice = 'auto';
   
-  int _freeUploadsRemaining = 1; // ✅ 3 uploads gratuits
+  int _freeUploadsRemaining = 0;
 
   final Color ytBlack = const Color(0xFF0F0F0F);
   final Color ytRed = const Color(0xFFFF0000);
   final Color ytSurface = const Color(0xFF272727);
 
-  // ✅ TOUTES LES LANGUES EDGE TTS
+  // Toutes les langues Edge TTS
   final List<Map<String, String>> _languages = [
     {'code': 'af', 'name': 'Afrikaans', 'flag': '🇿🇦'},
     {'code': 'am', 'name': 'አማርኛ', 'flag': '🇪🇹'},
@@ -166,7 +168,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: Column(
         children: [
-          // Barre de recherche
+          // Barre de recherche YouTube
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Container(
@@ -193,106 +195,152 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
 
-          // ✅ BOUTON UPLOAD avec compteur
+          // ✅ DEUX BOUTONS : GALERIE + FICHIER
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: InkWell(
-              onTap: _isUploading ? null : _pickAndUploadFile,
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: _isUploading 
-                      ? [Colors.grey[800]!, Colors.grey[700]!]
-                      : [ytRed, const Color(0xFFCC0000)],
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  boxShadow: _isUploading ? [] : [
-                    BoxShadow(
-                      color: ytRed.withOpacity(0.3),
-                      blurRadius: 8,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (_isUploading)
-                      const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
+            child: Row(
+              children: [
+                // BOUTON GALERIE
+                Expanded(
+                  child: InkWell(
+                    onTap: _isUploading ? null : _pickFromGallery,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: _isUploading 
+                            ? [Colors.grey[800]!, Colors.grey[700]!]
+                            : [Colors.purple, Colors.purple[700]!],
                         ),
-                      )
-                    else
-                      const Icon(Icons.upload_file, color: Colors.white, size: 24),
-                    
-                    const SizedBox(width: 10),
-                    
-                    Text(
-                      _isUploading 
-                        ? 'Upload en cours...' 
-                        : '📤 Uploader Vidéo/Audio',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    
-                    // ✅ COMPTEUR UPLOADS GRATUITS
-                    if (!_isUploading && _freeUploadsRemaining > 0)
-                      Container(
-                        margin: const EdgeInsets.only(left: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.green,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          '$_freeUploadsRemaining',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: _isUploading ? [] : [
+                          BoxShadow(
+                            color: Colors.purple.withOpacity(0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
                           ),
-                        ),
+                        ],
                       ),
-                    
-                    // ✅ ICÔNE REWARDED SI ÉPUISÉ
-                    if (!_isUploading && _freeUploadsRemaining <= 0)
-                      Container(
-                        margin: const EdgeInsets.only(left: 8),
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.orange,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: const [
-                            Icon(Icons.card_giftcard, color: Colors.white, size: 14),
-                            SizedBox(width: 4),
-                            Text(
-                              'Pub',
-                              style: TextStyle(
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (_isUploading)
+                            const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
                                 color: Colors.white,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
+                              ),
+                            )
+                          else
+                            const Icon(Icons.photo_library, color: Colors.white, size: 20),
+                          
+                          const SizedBox(width: 8),
+                          
+                          const Text(
+                            '📸 Galerie',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                
+                const SizedBox(width: 10),
+                
+                // BOUTON FICHIER
+                Expanded(
+                  child: InkWell(
+                    onTap: _isUploading ? null : _pickAndUploadFile,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: _isUploading 
+                            ? [Colors.grey[800]!, Colors.grey[700]!]
+                            : [ytRed, const Color(0xFFCC0000)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: _isUploading ? [] : [
+                          BoxShadow(
+                            color: ytRed.withOpacity(0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (_isUploading)
+                            const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          else
+                            const Icon(Icons.upload_file, color: Colors.white, size: 20),
+                          
+                          const SizedBox(width: 8),
+                          
+                          const Text(
+                            '📁 Fichier',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          
+                          // Compteur uploads gratuits
+                          if (!_isUploading && _freeUploadsRemaining > 0)
+                            Container(
+                              margin: const EdgeInsets.only(left: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '$_freeUploadsRemaining',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
-                          ],
-                        ),
+                          
+                          // Icône rewarded
+                          if (!_isUploading && _freeUploadsRemaining <= 0)
+                            Container(
+                              margin: const EdgeInsets.only(left: 4),
+                              padding: const EdgeInsets.all(4),
+                              decoration: BoxDecoration(
+                                color: Colors.orange,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.card_giftcard, color: Colors.white, size: 12),
+                            ),
+                        ],
                       ),
-                  ],
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
           ),
 
-          // Sélecteurs langue/voix avec drapeaux
+          // Sélecteurs langue/voix
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: Row(
@@ -300,7 +348,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 Expanded(
                   child: _buildActionButton(
                     label: _languages.firstWhere((l) => l['code'] == _selectedLang)['name']!,
-                    emoji: _languages.firstWhere((l) => l['code'] == _selectedLang)['flag']!, // ✅ DRAPEAU
+                    emoji: _languages.firstWhere((l) => l['code'] == _selectedLang)['flag']!,
                     onTap: _showLanguagePicker,
                   ),
                 ),
@@ -334,7 +382,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
           ),
           
-          // ✅ BANNIÈRE FIXE EN BAS
+          // Bannière pub
           const AdBannerWidget(),
         ],
       ),
@@ -358,7 +406,7 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(emoji, style: const TextStyle(fontSize: 20)), // ✅ EMOJI au lieu d'icon
+            Text(emoji, style: const TextStyle(fontSize: 20)),
             const SizedBox(width: 8),
             Flexible(
               child: Text(
@@ -395,7 +443,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            '📤 Uploadez votre fichier',
+            '📸 Choisissez depuis la galerie',
             style: TextStyle(color: Colors.grey[600], fontSize: 16),
           ),
         ],
@@ -403,9 +451,63 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ✅ MÉTHODE UPLOAD AVEC REWARDED
-  Future<void> _pickAndUploadFile() async {
+  // ✅ MÉTHODE GALERIE
+  Future<void> _pickFromGallery() async {
     // Vérifier uploads gratuits
+    if (_freeUploadsRemaining <= 0) {
+      _showUploadRewardedDialog();
+      return;
+    }
+    
+    try {
+      // Afficher choix vidéo
+      final XFile? pickedFile = await _imagePicker.pickVideo(
+        source: ImageSource.gallery,
+      );
+      
+      if (pickedFile == null) {
+        print('❌ Aucun fichier sélectionné');
+        return;
+      }
+      
+      final file = File(pickedFile.path);
+      final fileName = pickedFile.name;
+      final fileSize = await file.length();
+      
+      print('📸 Galerie: $fileName (${(fileSize / 1024 / 1024).toStringAsFixed(2)} MB)');
+      
+      if (fileSize > 500 * 1024 * 1024) {
+        _showError('Fichier trop volumineux (max 500 MB)');
+        return;
+      }
+      
+      setState(() => _isUploading = true);
+      
+      final uploadResult = await _uploadService.uploadFile(file);
+      
+      setState(() => _isUploading = false);
+      
+      if (uploadResult['success'] == true) {
+        // Décrémenter
+        setState(() {
+          if (_freeUploadsRemaining > 0) {
+            _freeUploadsRemaining--;
+          }
+        });
+        
+        _playUploadedFile(fileName);
+      } else {
+        _showError(uploadResult['error'] ?? 'Erreur upload');
+      }
+      
+    } catch (e) {
+      setState(() => _isUploading = false);
+      _showError('Erreur: $e');
+    }
+  }
+
+  // ✅ MÉTHODE FICHIER (avec rewarded)
+  Future<void> _pickAndUploadFile() async {
     if (_freeUploadsRemaining <= 0) {
       _showUploadRewardedDialog();
       return;
@@ -414,7 +516,7 @@ class _HomeScreenState extends State<HomeScreen> {
     await _performUpload();
   }
 
-  // ✅ DIALOG REWARDED
+  // Dialog rewarded
   Future<void> _showUploadRewardedDialog() async {
     final shouldWatch = await showDialog<bool>(
       context: context,
@@ -448,7 +550,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Regarde une pub pour débloquer 3 uploads supplémentaires !',
+              'Regarde une pub pour débloquer 2 uploads supplémentaires !',
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70, fontSize: 14),
             ),
@@ -478,16 +580,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (shouldWatch == true) {
       await _watchRewardedForUpload();
-
-      setState(() {
-        _freeUploadsRemaining += 1;
-      });
     }
   }
 
-  // ✅ AFFICHER REWARDED
+  // Afficher rewarded
   Future<void> _watchRewardedForUpload() async {
-    
     if (!_adManager.isRewardedReady) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('⏳ Chargement pub...')),
@@ -509,22 +606,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
     if (rewarded) {
       setState(() {
-        _freeUploadsRemaining += 3;
+        _freeUploadsRemaining += 2;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('🎉 +3 uploads débloqués ! Total: $_freeUploadsRemaining'),
+          content: Text('🎉 +2 uploads débloqués ! Total: $_freeUploadsRemaining'),
           backgroundColor: Colors.green,
           duration: const Duration(seconds: 3),
         ),
       );
-    
+
       await _performUpload();
     }
   }
 
-  // ✅ UPLOAD EFFECTIF
+  // Upload effectif
   Future<void> _performUpload() async {
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
@@ -552,7 +649,6 @@ class _HomeScreenState extends State<HomeScreen> {
       setState(() => _isUploading = false);
       
       if (uploadResult['success'] == true) {
-        // ✅ DÉCRÉMENTER
         setState(() {
           if (_freeUploadsRemaining > 0) {
             _freeUploadsRemaining--;
@@ -610,10 +706,10 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (context) => Container(
         padding: const EdgeInsets.all(20),
-        height: MediaQuery.of(context).size.height * 0.7, // ✅ Hauteur fixe pour scroll
+        height: MediaQuery.of(context).size.height * 0.7,
         child: Column(
           children: [
-            Text(
+            const Text(
               'Choisir la langue',
               style: TextStyle(
                 color: Colors.white,

@@ -3,15 +3,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:youtube_player_flutter/youtube_player_flutter.dart';
 import '../../data/models/video_model.dart';
 import '../../data/models/translation_model.dart';
 import '../../data/services/websocket_service.dart';
 import '../../data/services/synchronized_player_service.dart';
+import '../../data/services/ad_manager.dart';
 import '../widgets/transcript_view.dart';
 import 'package:video_player/video_player.dart';
-import '../../data/services/ad_manager.dart'; // ✅ CORRECTION du chemin
 
 class PlayerScreen extends StatefulWidget {
   final VideoModel video;
@@ -29,10 +30,10 @@ class PlayerScreen extends StatefulWidget {
   State<PlayerScreen> createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen> with SingleTickerProviderStateMixin {
   final WebSocketService _wsService = WebSocketService();
   late SynchronizedPlayerService _syncPlayer;
-  final AdManager _adManager = AdManager(); // ✅ AJOUTER CETTE LIGNE
+  final AdManager _adManager = AdManager();
 
   String _status = 'Connexion NeuralNet...';
   double _progress = 0.0;
@@ -40,7 +41,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isTranslating = true;
   bool _waitingForFirstChunk = true;
   bool _isPlaying = false;
-  bool _isTranslationComplete = false; // ✅ AJOUTER
+  bool _isTranslationComplete = false;
   
   bool _isControlsExpanded = true;
 
@@ -48,6 +49,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double _volOriginal = 0.5;
 
   Timer? _uiTimer;
+  Timer? _connectionTimeoutTimer;
+  
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnimation;
 
   final Color ytRed = const Color(0xFFFF0000);
   final Color ytBlack = const Color(0xFF0F0F0F);
@@ -55,13 +60,100 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    
+    // Log device info
+    print('📱 Device: ${Platform.operatingSystem}');
+    print('📱 Video: ${widget.video.title}');
+    
+    _pulseController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    )..repeat(reverse: true);
+    
+    _pulseAnimation = Tween<double>(begin: 0.8, end: 1.2).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+    
     _initializeSyncPlayer();
     _connectAndStartTranslation();
     _startUIUpdates();
+    _startConnectionTimeout();
     
-    // ✅ PRÉCHARGER LES ADS
     _adManager.loadInterstitialAd();
     _adManager.loadRewardedAd();
+  }
+
+  void _startConnectionTimeout() {
+    _connectionTimeoutTimer?.cancel();
+    _connectionTimeoutTimer = Timer(const Duration(seconds: 120), () {
+      if (_waitingForFirstChunk && mounted) {
+        print('⏱️ TIMEOUT : Aucune donnée reçue après 120s');
+        setState(() {
+          _status = '❌ Connexion timeout';
+          _waitingForFirstChunk = false;
+        });
+        
+        _showErrorDialog(
+          'Connexion timeout',
+          'Impossible de se connecter au serveur. Vérifiez votre connexion internet et réessayez.',
+        );
+      }
+    });
+  }
+
+  void _showErrorDialog(String title, String message) {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.error_outline, color: ytRed, size: 30),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          message,
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              Navigator.pop(context);
+            },
+            child: const Text('Retour', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              setState(() {
+                _waitingForFirstChunk = true;
+                _status = 'Reconnexion...';
+                _progress = 0.0;
+              });
+              _connectAndStartTranslation();
+              _startConnectionTimeout();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: ytRed,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Réessayer'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _initializeSyncPlayer() async {
@@ -71,7 +163,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       print('📁 Fichier uploadé avec vidéo');
       
       final filename = widget.video.url.replaceFirst('uploaded://', '');
-      final videoUrl = 'http://youlangue-production.up.railway.app/uploads/$filename';
+      final videoUrl = 'http://172.20.10.4:8000/uploads/$filename';
       
       print('🎬 URL vidéo: $videoUrl');
       
@@ -164,20 +256,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _connectAndStartTranslation() async {
     try {
       await _wsService.connect();
-      _wsService.stream?.listen(_handleWebSocketMessage);
+      _wsService.stream?.listen(
+        _handleWebSocketMessage,
+        onError: (error) {
+          print('❌ WebSocket error: $error');
+          if (mounted) {
+            _showErrorDialog(
+              'Erreur de connexion',
+              'La connexion au serveur a été perdue. Vérifiez votre connexion internet.',
+            );
+          }
+        },
+        onDone: () {
+          print('🔌 WebSocket fermé');
+          if (_waitingForFirstChunk && mounted) {
+            _showErrorDialog(
+              'Connexion perdue',
+              'La connexion au serveur a été interrompue.',
+            );
+          }
+        },
+      );
       _wsService.startTranslation(
         videoUrl: widget.video.url,
         targetLang: widget.targetLang,
         voicePreference: widget.voiceType,
       );
     } catch (e) {
-      setState(() => _status = 'Erreur uplink');
+      print('❌ Erreur connexion: $e');
+      if (mounted) {
+        setState(() => _status = 'Erreur connexion');
+        _showErrorDialog(
+          'Erreur',
+          'Impossible de se connecter au serveur. Vérifiez votre connexion internet.',
+        );
+      }
     }
   }
 
   void _handleWebSocketMessage(dynamic message) {
     if (!mounted) return;
     
+    // Annuler timeout quand message reçu
+    if (_connectionTimeoutTimer != null && _connectionTimeoutTimer!.isActive) {
+      _connectionTimeoutTimer!.cancel();
+    }
     try {
       final data = json.decode(message);
       final type = data['type'];
@@ -189,6 +312,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           setState(() => _status = data['message']);
           break;
          
+        case 'heartbeat':
+            print('💓 Heartbeat'); // Ne pas ignorer !
+            break; 
         case 'voice_detected':
           final voiceType = data['voice_type'];
           print('🎤 Type de voix détecté: $voiceType');
@@ -245,10 +371,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           setState(() {
             _status = "SYSTÈME PRÊT";
             _isTranslating = false;
-            _isTranslationComplete = true; // ✅ AJOUTER
+            _isTranslationComplete = true;
           });
           
-          // ✅ AFFICHER INTERSTITIAL après 1 seconde
           Future.delayed(const Duration(seconds: 1), () {
             if (mounted) {
               _adManager.showInterstitialAd();
@@ -258,11 +383,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
           
         case 'error':
           print('❌ Erreur serveur: ${data['message']}');
-          setState(() => _status = 'Erreur: ${data['message']}');
+          setState(() {
+            _status = 'Erreur: ${data['message']}';
+            _waitingForFirstChunk = false;
+          });
+          
+          _showErrorDialog(
+            'Erreur serveur',
+            data['message'] ?? 'Une erreur est survenue',
+          );
           break;
       }
     } catch (e) { 
-      print('❌ Erreur parsing: $e'); 
+      print('❌ Erreur parsing: $e');
+      
+      setState(() {
+        _status = 'Erreur de communication';
+        _waitingForFirstChunk = false;
+      });
+      
+      _showErrorDialog(
+        'Erreur',
+        'Impossible de communiquer avec le serveur.',
+      );
     }
   }
 
@@ -310,7 +453,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             curve: Curves.fastOutSlowIn,
             left: 15,
             right: 15,
-            bottom: _isControlsExpanded ? 20 : -300, // ✅ Augmenté pour bouton rewarded
+            bottom: _isControlsExpanded ? 20 : -300,
             child: _buildCollapsibleDock(),
           ),
           
@@ -425,7 +568,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Widget _buildVolumeMixer() {
     return Column(
       children: [
-        // Volume traduit
         Row(
           children: [
             const Icon(Icons.record_voice_over, color: Colors.white, size: 18),
@@ -457,7 +599,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         
         const SizedBox(height: 10),
         
-        // Volume original
         Row(
           children: [
             Icon(Icons.volume_up, color: ytRed, size: 18),
@@ -487,7 +628,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ],
         ),
         
-        // ✅ BOUTON REWARDED (apparaît si volumes < 100%)
         if (_isTranslationComplete && (_volTranslated < 1.0 || _volOriginal < 1.0))
           Padding(
             padding: const EdgeInsets.only(top: 12),
@@ -509,7 +649,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  // ✅ MÉTHODE REWARDED
   Future<void> _showRewardedForVolumeBoost() async {
     if (!_adManager.isRewardedReady) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -525,7 +664,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final rewarded = await _adManager.showRewardedAd();
 
     if (rewarded) {
-      // ✅ RÉCOMPENSE : Volume max
       setState(() {
         _volTranslated = 1.0;
         _volOriginal = 1.0;
@@ -543,69 +681,249 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
- Widget _buildCyberHeader() {
-  return AnimatedOpacity(
-    opacity: _isControlsExpanded ? 1.0 : 0.0, // ✅ Cache avec les contrôles
-    duration: const Duration(milliseconds: 300),
-    child: ClipRRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 50, 16, 12), // ✅ Padding réduit
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withOpacity(0.7),
-                Colors.black.withOpacity(0.0),
+  Widget _buildCyberHeader() {
+    return AnimatedOpacity(
+      opacity: _isControlsExpanded ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 300),
+      child: ClipRRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 50, 16, 12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.7),
+                  Colors.black.withOpacity(0.0),
+                ],
+              ),
+            ),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
+                  onPressed: () => Navigator.pop(context),
+                ),
+                Expanded(
+                  child: Text(
+                    widget.video.title.toUpperCase(),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.5,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ],
             ),
           ),
-          child: Row(
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingOverlay() {
+    return BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+      child: Container(
+        color: Colors.black.withOpacity(0.85),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              IconButton(
-                icon: const Icon(Icons.arrow_back_ios, color: Colors.white, size: 20),
-                onPressed: () => Navigator.pop(context),
+              AnimatedBuilder(
+                animation: _pulseAnimation,
+                builder: (context, child) {
+                  return Transform.scale(
+                    scale: _pulseAnimation.value,
+                    child: Container(
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: ytRed.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.translate,
+                        size: 60,
+                        color: ytRed,
+                      ),
+                    ),
+                  );
+                },
               ),
-              Expanded(
-                child: Text(
-                  widget.video.title.toUpperCase(),
-                  style: const TextStyle(
+              
+              const SizedBox(height: 30),
+              
+              if (_progress > 0)
+                Text(
+                  '${(_progress * 100).toInt()}%',
+                  style: TextStyle(
                     color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.5,
+                    fontSize: 48,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 2,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                ),
+              
+              const SizedBox(height: 20),
+              
+              Container(
+                width: MediaQuery.of(context).size.width * 0.7,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: Colors.white10,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: _progress > 0 ? _progress : 0.1,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [ytRed, Colors.orange],
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                      boxShadow: [
+                        BoxShadow(
+                          color: ytRed.withOpacity(0.5),
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-             
-
+              
+              const SizedBox(height: 30),
+              
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white.withOpacity(0.2)),
+                ),
+                child: Column(
+                  children: [
+                    Text(
+                      _status,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    
+                    const SizedBox(height: 10),
+                    
+                    SizedBox(
+                      width: 30,
+                      height: 30,
+                      child: CircularProgressIndicator(
+                        color: ytRed,
+                        strokeWidth: 3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              const SizedBox(height: 20),
+              
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: Text(
+                  _getLoadingTip(),
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              
+              const SizedBox(height: 40),
+              
+              TextButton(
+                onPressed: () {
+                  _connectionTimeoutTimer?.cancel();
+                  _wsService.disconnect();
+                  Navigator.pop(context);
+                },
+                child: Text(
+                  'Annuler',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
             ],
           ),
         ),
       ),
-    ),
-  );
-}
-  Widget _buildLoadingOverlay() {
-    return BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-      child: Container(
-        color: Colors.black54,
-        child: Center(
-          child: CircularProgressIndicator(color: ytRed),
-        ),
-      ),
     );
+  }
+
+  String _getLoadingTip() {
+    final tips = [
+      '💡 La traduction IA analyse la voix en temps réel',
+      '🎯 L\'audio original et traduit seront synchronisés',
+      '🌍 ${_getLanguageName(widget.targetLang)} détecté',
+      '⚡ Traitement neuronal en cours...',
+      '🎵 Synthèse vocale haute qualité',
+      '🔊 Les volumes seront ajustables après le chargement',
+      '⏱️ Préparation de la synchronisation parfaite...',
+    ];
+    
+    if (_status.contains('Connexion')) return tips[3];
+    if (_status.contains('Voix')) return tips[0];
+    if (_status.contains('Audio')) return tips[4];
+    if (_status.contains('chunk')) return tips[1];
+    
+    return tips[(_progress * tips.length).toInt() % tips.length];
+  }
+
+  String _getLanguageName(String code) {
+    final languages = {
+      'af': 'Afrikaans', 'am': 'አማርኛ', 'ar': 'العربية', 'az': 'Azərbaycan',
+      'bg': 'Български', 'bn': 'বাংলা', 'bs': 'Bosanski', 'ca': 'Català',
+      'cs': 'Čeština', 'cy': 'Cymraeg', 'da': 'Dansk', 'de': 'Deutsch',
+      'el': 'Ελληνικά', 'en': 'English', 'es': 'Español', 'et': 'Eesti',
+      'eu': 'Euskara', 'fa': 'فارسی', 'fi': 'Suomi', 'fil': 'Filipino',
+      'fr': 'Français', 'ga': 'Gaeilge', 'gl': 'Galego', 'gu': 'ગુજરાતી',
+      'he': 'עברית', 'hi': 'हिन्दी', 'hr': 'Hrvatski', 'hu': 'Magyar',
+      'hy': 'Հայերեն', 'id': 'Indonesia', 'is': 'Íslenska', 'it': 'Italiano',
+      'ja': '日本語', 'jv': 'Basa Jawa', 'ka': 'ქართული', 'kk': 'Қазақ',
+      'km': 'ខ្មែរ', 'kn': 'ಕನ್ನಡ', 'ko': '한국어', 'lo': 'ລາວ',
+      'lt': 'Lietuvių', 'lv': 'Latviešu', 'mk': 'Македонски', 'ml': 'മലയാളം',
+      'mn': 'Монгол', 'mr': 'मराठी', 'ms': 'Melayu', 'mt': 'Malti',
+      'my': 'မြန်မာ', 'nb': 'Norsk', 'ne': 'नेपाली', 'nl': 'Nederlands',
+      'pl': 'Polski', 'ps': 'پښتو', 'pt': 'Português', 'ro': 'Română',
+      'ru': 'Русский', 'si': 'සිංහල', 'sk': 'Slovenčina', 'sl': 'Slovenščina',
+      'so': 'Soomaali', 'sq': 'Shqip', 'sr': 'Српски', 'su': 'Sunda',
+      'sv': 'Svenska', 'sw': 'Kiswahili', 'ta': 'தமிழ்', 'te': 'తెలుగు',
+      'th': 'ไทย', 'tr': 'Türkçe', 'uk': 'Українська', 'ur': 'اردو',
+      'uz': 'Oʻzbek', 'vi': 'Tiếng Việt', 'wo': 'Wolof', 'zh': '中文',
+      'zu': 'isiZulu',
+    };
+    return languages[code] ?? code.toUpperCase();
   }
 
   @override
   void dispose() {
     print('🗑️ Dispose PlayerScreen');
     _uiTimer?.cancel();
+    _connectionTimeoutTimer?.cancel();
+    _pulseController.dispose();
     _syncPlayer.dispose();
     _wsService.disconnect();
     super.dispose();
